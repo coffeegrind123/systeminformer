@@ -29,9 +29,8 @@ jobs:
       working-directory: ${{github.workspace}}
       run: build\build_release.cmd
     
-    # Add this step to upload x64 artifacts
     - name: Upload x64 Release Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: systeminformer-x64
         path: |
