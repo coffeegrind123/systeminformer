@@ -1962,226 +1962,6 @@ NTSTATUS PhGetProcessRuntimeLibrary(
     return STATUS_SUCCESS;
 }
 
-/**
- * Causes a process to load a DLL.
- *
- * \param ProcessHandle A handle to a process. The handle must have
- * PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_CREATE_THREAD, PROCESS_VM_OPERATION, PROCESS_VM_READ
- * and PROCESS_VM_WRITE access.
- * \param FileName The file name of the DLL to inject.
- * \param LoadDllUsingApcThread Queues an APC (Asynchronous Procedure Call) when calling LoadLibraryW.
- * \param Timeout The timeout, in milliseconds, for the process to load the DLL.
- *
- * \remarks If the process does not load the DLL before the timeout expires it may crash. Choose the
- * timeout value carefully.
- */
-NTSTATUS PhLoadDllProcess(
-    _In_ HANDLE ProcessHandle,
-    _In_ PPH_STRINGREF FileName,
-    _In_ BOOLEAN LoadDllUsingApcThread,
-    _In_opt_ ULONG Timeout
-    )
-{
-    NTSTATUS status;
-    HANDLE fileHandle = NULL;
-    PVOID fileBuffer = NULL;
-    PVOID imageBase = NULL;
-    PVOID loaderMemory = NULL;
-    HANDLE threadHandle = NULL;
-    LARGE_INTEGER fileSize;
-    IO_STATUS_BLOCK iosb;
-    PIMAGE_DOS_HEADER dosHeader;
-    PIMAGE_NT_HEADERS ntHeaders;
-    MANUAL_INJECT manualInject;
-    UNICODE_STRING fileName;
-    OBJECT_ATTRIBUTES objectAttributes;
-
-    UNREFERENCED_PARAMETER(LoadDllUsingApcThread);
-
-    if (KphProcessLevel(ProcessHandle) > KphLevelMed)
-    {
-        return STATUS_ACCESS_DENIED;
-    }
-
-    // Open DLL file
-    RtlInitUnicodeString(&fileName, FileName->Buffer);
-    InitializeObjectAttributes(&objectAttributes, &fileName, OBJ_CASE_INSENSITIVE, NULL, NULL);
-    
-    status = NtOpenFile(
-        &fileHandle,
-        FILE_GENERIC_READ,
-        &objectAttributes,
-        &iosb,
-        FILE_SHARE_READ,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
-        );
-
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Get file size
-    status = NtQueryInformationFile(fileHandle, &iosb, &fileSize, sizeof(fileSize), FileStandardInformation);
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Allocate buffer for file
-    SIZE_T bufferSize = (SIZE_T)fileSize.QuadPart;
-    status = NtAllocateVirtualMemory(
-        NtCurrentProcess(),
-        &fileBuffer,
-        0,
-        &bufferSize,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE
-        );
-
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Read file into buffer
-    status = NtReadFile(fileHandle, NULL, NULL, NULL, &iosb, fileBuffer, (ULONG)fileSize.QuadPart, NULL, NULL);
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Validate PE headers
-    dosHeader = (PIMAGE_DOS_HEADER)fileBuffer;
-    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
-    {
-        status = STATUS_INVALID_IMAGE_FORMAT;
-        goto CleanupExit;
-    }
-
-    ntHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)fileBuffer + dosHeader->e_lfanew);
-    if (ntHeaders->Signature != IMAGE_NT_SIGNATURE)
-    {
-        status = STATUS_INVALID_IMAGE_FORMAT;
-        goto CleanupExit;
-    }
-
-    if (!(ntHeaders->FileHeader.Characteristics & IMAGE_FILE_DLL))
-    {
-        status = STATUS_INVALID_IMAGE_FORMAT;
-        goto CleanupExit;
-    }
-
-    // Allocate memory in target process for DLL image
-    SIZE_T imageSize = ntHeaders->OptionalHeader.SizeOfImage;
-    status = NtAllocateVirtualMemory(
-        ProcessHandle,
-        &imageBase,
-        0,
-        &imageSize,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_EXECUTE_READWRITE
-        );
-
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Copy headers
-    status = NtWriteVirtualMemory(ProcessHandle, imageBase, fileBuffer, 0x1000, NULL);
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Copy sections
-    PIMAGE_SECTION_HEADER sectionHeader = IMAGE_FIRST_SECTION(ntHeaders);
-    for (WORD i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++)
-    {
-        if (sectionHeader->PointerToRawData)
-        {
-            status = NtWriteVirtualMemory(
-                ProcessHandle,
-                (PVOID)((LPBYTE)imageBase + sectionHeader->VirtualAddress),
-                (PVOID)((LPBYTE)fileBuffer + sectionHeader->PointerToRawData),
-                sectionHeader->SizeOfRawData,
-                NULL
-                );
-
-            if (!NT_SUCCESS(status))
-                goto CleanupExit;
-        }
-        sectionHeader++;
-    }
-
-    // Calculate shellcode size
-    SIZE_T shellcodeSize = (SIZE_T)((LPBYTE)ManualMapShellcodeEnd - (LPBYTE)ManualMapShellcode);
-    if (shellcodeSize == 0 || shellcodeSize > 0x10000)
-        shellcodeSize = 4096; // Fallback size
-
-    // Allocate memory for loader code
-    SIZE_T loaderSize = sizeof(MANUAL_INJECT) + shellcodeSize + 512;
-    status = NtAllocateVirtualMemory(
-        ProcessHandle,
-        &loaderMemory,
-        0,
-        &loaderSize,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_EXECUTE_READWRITE
-        );
-
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Setup manual inject structure
-    RtlZeroMemory(&manualInject, sizeof(manualInject));
-    manualInject.ImageBase = imageBase;
-    manualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)imageBase + dosHeader->e_lfanew);
-    manualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)imageBase + 
-        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-    manualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageBase + 
-        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    manualInject.fnLoadLibraryA = LoadLibraryA;
-    manualInject.fnGetProcAddress = GetProcAddress;
-
-    // Write manual inject structure
-    status = NtWriteVirtualMemory(ProcessHandle, loaderMemory, &manualInject, sizeof(manualInject), NULL);
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Write shellcode
-    PVOID shellcodeAddress = (PVOID)((PMANUAL_INJECT)loaderMemory + 1);
-    status = NtWriteVirtualMemory(ProcessHandle, shellcodeAddress, ManualMapShellcode, shellcodeSize, NULL);
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Create remote thread to execute shellcode
-    status = PhCreateUserThread(
-        ProcessHandle,
-        NULL,
-        THREAD_ALL_ACCESS,
-        0,
-        0,
-        0,
-        0,
-        shellcodeAddress,
-        loaderMemory,
-        &threadHandle,
-        NULL
-        );
-
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Wait for completion
-    status = PhWaitForSingleObject(threadHandle, Timeout);
-
-CleanupExit:
-    if (threadHandle)
-        NtClose(threadHandle);
-
-    if (loaderMemory)
-        PhFreeVirtualMemory(ProcessHandle, loaderMemory, MEM_RELEASE);
-
-    if (fileBuffer)
-        PhFreeVirtualMemory(NtCurrentProcess(), fileBuffer, MEM_RELEASE);
-
-    if (fileHandle)
-        NtClose(fileHandle);
-
-    return status;
-}
-
-// Manual mapping structures and shellcode
 typedef HMODULE(WINAPI* pLoadLibraryA)(LPCSTR);
 typedef FARPROC(WINAPI* pGetProcAddress)(HMODULE, LPCSTR);
 typedef BOOL(WINAPI* PDLL_MAIN)(HMODULE, DWORD, PVOID);
@@ -2197,7 +1977,6 @@ typedef struct _MANUAL_INJECT
     HINSTANCE hMod;
 } MANUAL_INJECT, *PMANUAL_INJECT;
 
-// Position-independent shellcode for manual mapping
 DWORD WINAPI ManualMapShellcode(PVOID p)
 {
     PMANUAL_INJECT ManualInject = (PMANUAL_INJECT)p;
@@ -2205,7 +1984,6 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
     if (!ManualInject)
         return FALSE;
 
-    // Handle relocations
     PIMAGE_BASE_RELOCATION pIBR = ManualInject->BaseRelocation;
     DWORD64 delta = (DWORD64)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
 
@@ -2237,7 +2015,6 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
         }
     }
 
-    // Handle imports
     PIMAGE_IMPORT_DESCRIPTOR pIID = ManualInject->ImportDirectory;
 
     if (pIID)
@@ -2283,7 +2060,6 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
         }
     }
 
-    // Execute TLS callbacks
     if (ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size)
     {
         PIMAGE_TLS_DIRECTORY64 pTLS = (PIMAGE_TLS_DIRECTORY64)((LPBYTE)ManualInject->ImageBase + 
@@ -2299,7 +2075,6 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
         }
     }
 
-    // Call DLL main
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
         PDLL_MAIN EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
@@ -2325,6 +2100,211 @@ DWORD WINAPI ManualMapShellcodeEnd()
 {
     return 0;
 }
+
+/**
+ * Causes a process to load a DLL.
+ *
+ * \param ProcessHandle A handle to a process. The handle must have
+ * PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_CREATE_THREAD, PROCESS_VM_OPERATION, PROCESS_VM_READ
+ * and PROCESS_VM_WRITE access.
+ * \param FileName The file name of the DLL to inject.
+ * \param LoadDllUsingApcThread Queues an APC (Asynchronous Procedure Call) when calling LoadLibraryW.
+ * \param Timeout The timeout, in milliseconds, for the process to load the DLL.
+ *
+ * \remarks If the process does not load the DLL before the timeout expires it may crash. Choose the
+ * timeout value carefully.
+ */
+NTSTATUS PhLoadDllProcess(
+    _In_ HANDLE ProcessHandle,
+    _In_ PPH_STRINGREF FileName,
+    _In_ BOOLEAN LoadDllUsingApcThread,
+    _In_opt_ ULONG Timeout
+    )
+{
+    NTSTATUS status;
+    HANDLE fileHandle = NULL;
+    PVOID fileBuffer = NULL;
+    PVOID imageBase = NULL;
+    PVOID loaderMemory = NULL;
+    HANDLE threadHandle = NULL;
+    LARGE_INTEGER fileSize;
+    IO_STATUS_BLOCK iosb;
+    PIMAGE_DOS_HEADER dosHeader;
+    PIMAGE_NT_HEADERS ntHeaders;
+    MANUAL_INJECT manualInject;
+    UNICODE_STRING fileName;
+    OBJECT_ATTRIBUTES objectAttributes;
+
+    UNREFERENCED_PARAMETER(LoadDllUsingApcThread);
+
+    if (KphProcessLevel(ProcessHandle) > KphLevelMed)
+    {
+        return STATUS_ACCESS_DENIED;
+    }
+
+    RtlInitUnicodeString(&fileName, FileName->Buffer);
+    InitializeObjectAttributes(&objectAttributes, &fileName, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    
+    status = NtOpenFile(
+        &fileHandle,
+        FILE_GENERIC_READ,
+        &objectAttributes,
+        &iosb,
+        FILE_SHARE_READ,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = NtQueryInformationFile(fileHandle, &iosb, &fileSize, sizeof(fileSize), FileStandardInformation);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    SIZE_T bufferSize = (SIZE_T)fileSize.QuadPart;
+    status = NtAllocateVirtualMemory(
+        NtCurrentProcess(),
+        &fileBuffer,
+        0,
+        &bufferSize,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_READWRITE
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = NtReadFile(fileHandle, NULL, NULL, NULL, &iosb, fileBuffer, (ULONG)fileSize.QuadPart, NULL, NULL);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    dosHeader = (PIMAGE_DOS_HEADER)fileBuffer;
+    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+    {
+        status = STATUS_INVALID_IMAGE_FORMAT;
+        goto CleanupExit;
+    }
+
+    ntHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)fileBuffer + dosHeader->e_lfanew);
+    if (ntHeaders->Signature != IMAGE_NT_SIGNATURE)
+    {
+        status = STATUS_INVALID_IMAGE_FORMAT;
+        goto CleanupExit;
+    }
+
+    if (!(ntHeaders->FileHeader.Characteristics & IMAGE_FILE_DLL))
+    {
+        status = STATUS_INVALID_IMAGE_FORMAT;
+        goto CleanupExit;
+    }
+
+    SIZE_T imageSize = ntHeaders->OptionalHeader.SizeOfImage;
+    status = NtAllocateVirtualMemory(
+        ProcessHandle,
+        &imageBase,
+        0,
+        &imageSize,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_EXECUTE_READWRITE
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = NtWriteVirtualMemory(ProcessHandle, imageBase, fileBuffer, 0x1000, NULL);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    PIMAGE_SECTION_HEADER sectionHeader = IMAGE_FIRST_SECTION(ntHeaders);
+    for (WORD i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++)
+    {
+        if (sectionHeader->PointerToRawData)
+        {
+            status = NtWriteVirtualMemory(
+                ProcessHandle,
+                (PVOID)((LPBYTE)imageBase + sectionHeader->VirtualAddress),
+                (PVOID)((LPBYTE)fileBuffer + sectionHeader->PointerToRawData),
+                sectionHeader->SizeOfRawData,
+                NULL
+                );
+
+            if (!NT_SUCCESS(status))
+                goto CleanupExit;
+        }
+        sectionHeader++;
+    }
+
+    SIZE_T shellcodeSize = (SIZE_T)((LPBYTE)ManualMapShellcodeEnd - (LPBYTE)ManualMapShellcode);
+    if (shellcodeSize == 0 || shellcodeSize > 0x10000)
+        shellcodeSize = 4096;
+
+    SIZE_T loaderSize = sizeof(MANUAL_INJECT) + shellcodeSize + 512;
+    status = NtAllocateVirtualMemory(
+        ProcessHandle,
+        &loaderMemory,
+        0,
+        &loaderSize,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_EXECUTE_READWRITE
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    RtlZeroMemory(&manualInject, sizeof(manualInject));
+    manualInject.ImageBase = imageBase;
+    manualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)imageBase + dosHeader->e_lfanew);
+    manualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)imageBase + 
+        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+    manualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageBase + 
+        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    manualInject.fnLoadLibraryA = LoadLibraryA;
+    manualInject.fnGetProcAddress = GetProcAddress;
+
+    status = NtWriteVirtualMemory(ProcessHandle, loaderMemory, &manualInject, sizeof(manualInject), NULL);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    PVOID shellcodeAddress = (PVOID)((PMANUAL_INJECT)loaderMemory + 1);
+    status = NtWriteVirtualMemory(ProcessHandle, shellcodeAddress, ManualMapShellcode, shellcodeSize, NULL);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = PhCreateUserThread(
+        ProcessHandle,
+        NULL,
+        THREAD_ALL_ACCESS,
+        0,
+        0,
+        0,
+        0,
+        shellcodeAddress,
+        loaderMemory,
+        &threadHandle,
+        NULL
+        );
+
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = PhWaitForSingleObject(threadHandle, Timeout);
+
+CleanupExit:
+    if (threadHandle)
+        NtClose(threadHandle);
+
+    if (loaderMemory)
+        PhFreeVirtualMemory(ProcessHandle, loaderMemory, MEM_RELEASE);
+
+    if (fileBuffer)
+        PhFreeVirtualMemory(NtCurrentProcess(), fileBuffer, MEM_RELEASE);
+
+    if (fileHandle)
+        NtClose(fileHandle);
+
+    return status;
+}
+
 
 /**
  * Causes a process to unload a DLL.
