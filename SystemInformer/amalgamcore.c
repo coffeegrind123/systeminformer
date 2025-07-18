@@ -1,4 +1,4 @@
-#include "AmalgamCore.h"
+#include <amalgamcore.h>
 
 // Position-independent shellcode function
 DWORD WINAPI LoadDll(PVOID p)

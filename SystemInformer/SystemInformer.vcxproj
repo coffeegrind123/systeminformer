@@ -223,6 +223,7 @@
     <ClCompile Include="actions.c" />
     <ClCompile Include="admintask.c" />
     <ClCompile Include="affinity.c" />
+    <ClCompile Include="amalgamcore.c" />
     <ClCompile Include="anawait.c" />
     <ClCompile Include="appsup.c" />
     <ClCompile Include="chcol.c" />
@@ -331,6 +332,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\actions.h" />
+    <ClInclude Include="include\amalgamcore.h" />
     <ClInclude Include="include\appsup.h" />
     <ClInclude Include="include\colmgr.h" />
     <ClInclude Include="include\colsetmgr.h" />

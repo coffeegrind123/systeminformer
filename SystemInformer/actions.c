@@ -18,7 +18,7 @@
 
 #include <phapp.h>
 #include <phplug.h>
-#include "../AmalgamCore/AmalgamCore.h"
+#include <amalgamcore.h>
 #include <actions.h>
 
 #include <kphuser.h>

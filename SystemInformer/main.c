@@ -34,7 +34,7 @@
 
 // AmalgamCore integration
 #include <TlHelp32.h>
-#include "../AmalgamCore/AmalgamCore.h"
+#include <amalgamcore.h>
 
 BOOLEAN PhPluginsEnabled = FALSE;
 BOOLEAN PhPortableEnabled = FALSE;
