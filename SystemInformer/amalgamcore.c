@@ -22,6 +22,9 @@ DWORD WINAPI LoadDll(PVOID p)
         return FALSE;
     }
 
+    // Mark that we entered the function successfully
+    ManualInject->hMod = (HINSTANCE)0x1234; // Entry marker
+
     // Handle relocations
     pIBR = ManualInject->BaseRelocation;
     delta = (DWORD64)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
@@ -494,6 +497,9 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
             VirtualFree(buffer, 0, MEM_RELEASE);
             CloseHandle(hProcess);
             return -1;
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1234) {
+            AmalgamLog("LoadDll function entered successfully but crashed during execution");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
