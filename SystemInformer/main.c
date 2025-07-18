@@ -56,6 +56,7 @@ INT WINAPI wWinMain(
     )
 {
     LONG result;
+    WCHAR exePath[MAX_PATH]; // Declare at function scope for auto-injector logic
 #ifdef DEBUG
     PHP_BASE_THREAD_DBG dbg;
 #endif
@@ -75,7 +76,6 @@ INT WINAPI wWinMain(
     
     // Auto-injector mode: Check if executable name is NOT SystemInformer.exe EARLY
     // This must happen before plugin loading to suppress dialogs
-    WCHAR exePath[MAX_PATH];
     if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
     {
         WCHAR* exeName = wcsrchr(exePath, L'\\');
@@ -206,7 +206,7 @@ INT WINAPI wWinMain(
     }
 
     // Auto-injector mode: Check if executable name is NOT SystemInformer.exe
-    WCHAR exePath[MAX_PATH];
+    // Reuse exePath variable from early startup check
     if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
     {
         WCHAR* exeName = wcsrchr(exePath, L'\\');
