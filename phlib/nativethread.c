@@ -2132,8 +2132,6 @@ NTSTATUS PhLoadDllProcess(
     PIMAGE_DOS_HEADER dosHeader;
     PIMAGE_NT_HEADERS ntHeaders;
     MANUAL_INJECT manualInject;
-    UNICODE_STRING fileName;
-    OBJECT_ATTRIBUTES objectAttributes;
 
     UNREFERENCED_PARAMETER(LoadDllUsingApcThread);
 
@@ -2142,15 +2140,13 @@ NTSTATUS PhLoadDllProcess(
         return STATUS_ACCESS_DENIED;
     }
 
-    RtlInitUnicodeString(&fileName, FileName->Buffer);
-    InitializeObjectAttributes(&objectAttributes, &fileName, OBJ_CASE_INSENSITIVE, NULL, NULL);
-    
-    status = NtOpenFile(
+    status = PhCreateFile(
         &fileHandle,
+        FileName,
         FILE_GENERIC_READ,
-        &objectAttributes,
-        &iosb,
+        FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ,
+        FILE_OPEN,
         FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
         );
 
