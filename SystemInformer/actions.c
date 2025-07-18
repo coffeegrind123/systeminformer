@@ -18,6 +18,7 @@
 
 #include <phapp.h>
 #include <phplug.h>
+#include "../AmalgamCore/AmalgamCore.h"
 #include <actions.h>
 
 #include <kphuser.h>
@@ -3391,12 +3392,10 @@ BOOLEAN PhUiLoadDllProcess(
 
     if (NT_SUCCESS(status))
     {
-        status = PhLoadDllProcess(
-            processHandle,
-            &fileName->sr,
-            FALSE,
-            5000
-            );
+        // Use AmalgamCore for injection
+        DWORD processId = GetProcessId(processHandle);
+        int result = ManualMapInject(fileName->Buffer, processId);
+        status = (result == 0) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
 
         NtClose(processHandle);
     }

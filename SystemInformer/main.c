@@ -32,6 +32,10 @@
 
 #include <trace.h>
 
+// AmalgamCore integration
+#include <TlHelp32.h>
+#include "../AmalgamCore/AmalgamCore.h"
+
 BOOLEAN PhPluginsEnabled = FALSE;
 BOOLEAN PhPortableEnabled = FALSE;
 PPH_STRING PhSettingsFileName = NULL;
@@ -174,6 +178,95 @@ INT WINAPI wWinMain(
     if (PhEnableKsiSupport)
     {
         PhShowKsiStatus();
+    }
+
+    // Auto-injector mode: Check if executable name is NOT SystemInformer.exe
+    WCHAR exePath[MAX_PATH];
+    if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
+    {
+        WCHAR* exeName = wcsrchr(exePath, L'\\');
+        if (exeName) exeName++; else exeName = exePath;
+        
+        if (wcscmp(exeName, L"SystemInformer.exe") != 0)
+        {
+            // Auto-injector mode: Apply stealth flags
+            PhStartupParameters.PhEnableSettings = FALSE;
+            PhStartupParameters.PhEnablePlugins = FALSE;
+            PhStartupParameters.PhEnableNewInstance = TRUE;
+            PhStartupParameters.PhEnableStartHidden = TRUE;
+            PhStartupParameters.PhEnableShowDialogs = FALSE;
+            PhStartupParameters.PhEnableKphNeeded = FALSE;
+            
+            // Check if folder has exactly one DLL and one EXE
+            WCHAR* lastSlash = wcsrchr(exePath, L'\\');
+            if (lastSlash)
+            {
+                *lastSlash = L'\0';
+                
+                WCHAR searchPattern[MAX_PATH];
+                WIN32_FIND_DATA findData;
+                HANDLE findHandle;
+                int dllCount = 0, exeCount = 0;
+                WCHAR foundDll[MAX_PATH] = {0};
+                
+                // Count DLL files
+                swprintf_s(searchPattern, MAX_PATH, L"%s\\*.dll", exePath);
+                findHandle = FindFirstFile(searchPattern, &findData);
+                if (findHandle != INVALID_HANDLE_VALUE)
+                {
+                    do {
+                        dllCount++;
+                        wcscpy_s(foundDll, MAX_PATH, findData.cFileName);
+                    } while (FindNextFile(findHandle, &findData));
+                    FindClose(findHandle);
+                }
+                
+                // Count EXE files
+                swprintf_s(searchPattern, MAX_PATH, L"%s\\*.exe", exePath);
+                findHandle = FindFirstFile(searchPattern, &findData);
+                if (findHandle != INVALID_HANDLE_VALUE)
+                {
+                    do {
+                        exeCount++;
+                    } while (FindNextFile(findHandle, &findData));
+                    FindClose(findHandle);
+                }
+                
+                // If exactly one DLL and one EXE, proceed with injection
+                if (dllCount == 1 && exeCount == 1)
+                {
+                    // Find target process with same name (but different PID)
+                    PROCESSENTRY32 pe32;
+                    pe32.dwSize = sizeof(PROCESSENTRY32);
+                    HANDLE hProcessSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                    
+                    if (hProcessSnap != INVALID_HANDLE_VALUE)
+                    {
+                        if (Process32First(hProcessSnap, &pe32))
+                        {
+                            do
+                            {
+                                if (wcscmp(pe32.szExeFile, exeName) == 0 && 
+                                    pe32.th32ProcessID != GetCurrentProcessId())
+                                {
+                                    // Found target process, inject DLL
+                                    WCHAR fullDllPath[MAX_PATH];
+                                    swprintf_s(fullDllPath, MAX_PATH, L"%s\\%s", exePath, foundDll);
+                                    
+                                    // Use AmalgamCore for injection
+                                    extern int ManualMapInject(const wchar_t* dllPath, DWORD processId);
+                                    ManualMapInject(fullDllPath, pe32.th32ProcessID);
+                                    
+                                    CloseHandle(hProcessSnap);
+                                    return 0; // Exit after injection
+                                }
+                            } while (Process32Next(hProcessSnap, &pe32));
+                        }
+                        CloseHandle(hProcessSnap);
+                    }
+                }
+            }
+        }
     }
 
     if (!PhMainWndInitialization(CmdShow))
