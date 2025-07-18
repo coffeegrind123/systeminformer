@@ -2352,8 +2352,8 @@ NTSTATUS PhLoadDllProcess(
         return STATUS_UNSUCCESSFUL;
     }
     
-    ManualInject.fnLoadLibraryA = (FARPROC)GetProcAddress(hKernel32, "LoadLibraryA");
-    ManualInject.fnGetProcAddress = (FARPROC)GetProcAddress(hKernel32, "GetProcAddress");
+    ManualInject.fnLoadLibraryA = (pLoadLibraryA)GetProcAddress(hKernel32, "LoadLibraryA");
+    ManualInject.fnGetProcAddress = (pGetProcAddress)GetProcAddress(hKernel32, "GetProcAddress");
     
     if (!ManualInject.fnLoadLibraryA || !ManualInject.fnGetProcAddress)
     {
