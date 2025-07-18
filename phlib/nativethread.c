@@ -2342,9 +2342,26 @@ NTSTATUS PhLoadDllProcess(
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
     ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
     ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    // Temporarily use AmalgamLoader's exact approach for testing
-    ManualInject.fnLoadLibraryA = LoadLibraryA;
-    ManualInject.fnGetProcAddress = GetProcAddress;
+    // Get function addresses in target process (kernel32.dll is loaded at same address in all processes)
+    HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+    if (!hKernel32)
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+    
+    ManualInject.fnLoadLibraryA = (FARPROC)GetProcAddress(hKernel32, "LoadLibraryA");
+    ManualInject.fnGetProcAddress = (FARPROC)GetProcAddress(hKernel32, "GetProcAddress");
+    
+    if (!ManualInject.fnLoadLibraryA || !ManualInject.fnGetProcAddress)
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
 
     // Write ManualInject structure (AmalgamLoader style)
     if (!WriteProcessMemory(ProcessHandle, mem1, &ManualInject, sizeof(MANUAL_INJECT), NULL))
