@@ -72,6 +72,30 @@ INT WINAPI wWinMain(
         return 1;
 
     PhpProcessStartupParameters();
+    
+    // Auto-injector mode: Check if executable name is NOT SystemInformer.exe EARLY
+    // This must happen before plugin loading to suppress dialogs
+    WCHAR exePath[MAX_PATH];
+    if (GetModuleFileNameW(NULL, exePath, MAX_PATH))
+    {
+        WCHAR* exeName = wcsrchr(exePath, L'\\');
+        if (exeName) exeName++; else exeName = exePath;
+        
+        if (wcscmp(exeName, L"SystemInformer.exe") != 0)
+        {
+            // Auto-injector mode: Apply stealth flags EARLY to suppress dialogs
+            PhStartupParameters.NoSettings = TRUE;
+            PhStartupParameters.NoPlugins = TRUE;
+            PhStartupParameters.NewInstance = TRUE;
+            PhStartupParameters.ShowHidden = TRUE;
+            PhStartupParameters.Silent = TRUE;
+            PhStartupParameters.NoKph = TRUE;
+            PhStartupParameters.ShowOptions = FALSE; // Suppress all dialogs
+            
+            // Continue with injection logic later in main function
+        }
+    }
+    
     PhpEnablePrivileges();
 
     if (PhStartupParameters.RunAsServiceMode)
@@ -190,14 +214,7 @@ INT WINAPI wWinMain(
         
         if (wcscmp(exeName, L"SystemInformer.exe") != 0)
         {
-            // Auto-injector mode: Apply stealth flags
-            PhStartupParameters.NoSettings = TRUE;
-            PhStartupParameters.NoPlugins = TRUE;
-            PhStartupParameters.NewInstance = TRUE;
-            PhStartupParameters.ShowHidden = TRUE;
-            PhStartupParameters.Silent = TRUE;
-            PhStartupParameters.NoKph = TRUE;
-            PhStartupParameters.ShowOptions = FALSE; // Suppress all dialogs
+            // Auto-injector mode: Stealth flags already set early in main()
             
             // Check if folder has exactly one DLL and one EXE
             WCHAR* lastSlash = wcsrchr(exePath, L'\\');

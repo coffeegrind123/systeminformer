@@ -16,16 +16,23 @@ DWORD WINAPI LoadDll(PVOID p)
     PIMAGE_IMPORT_BY_NAME pIBN;
     PDLL_MAIN EntryPoint;
 
-    ManualInject = (PMANUAL_INJECT)p;
+    // Validate the parameter pointer itself first
+    __try
+    {
+        ManualInject = (PMANUAL_INJECT)p;
+        if (!ManualInject) {
+            return FALSE;
+        }
 
-    if (!ManualInject) {
-        return FALSE;
+        // Validate critical pointers before use
+        if (!ManualInject->ImageBase || !ManualInject->NtHeaders) {
+            ManualInject->hMod = (HINSTANCE)0x409; // Invalid pointers
+            return FALSE;
+        }
     }
-
-    // Validate critical pointers before use
-    if (!ManualInject->ImageBase || !ManualInject->NtHeaders) {
-        if (ManualInject) ManualInject->hMod = (HINSTANCE)0x409; // Invalid pointers
-        return FALSE;
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        return FALSE; // Invalid parameter pointer
     }
 
     // Handle relocations
