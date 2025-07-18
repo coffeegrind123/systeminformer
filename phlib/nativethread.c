@@ -2315,57 +2315,14 @@ NTSTATUS PhLoadDllProcess(
     manualInject.ImageBase = imageBase;
     manualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)imageBase + dosHeader->e_lfanew);
     
-    if (ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress)
-    {
-        manualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)imageBase + 
-            ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-    }
-    else
-    {
-        manualInject.BaseRelocation = NULL;
-    }
+    manualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)imageBase + 
+        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+    manualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageBase + 
+        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
     
-    if (ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress)
-    {
-        manualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageBase + 
-            ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    }
-    else
-    {
-        manualInject.ImportDirectory = NULL;
-    }
-    
-    // Get function addresses in target process context
-    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
-    status = PhGetProcessRuntimeLibrary(ProcessHandle, &runtimeLibrary, NULL);
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-        
-    PVOID loadLibraryAddress = NULL;
-    PVOID getProcAddressAddress = NULL;
-    
-    status = PhGetProcedureAddressRemote(
-        ProcessHandle,
-        &runtimeLibrary->Kernel32FileName,
-        "LoadLibraryA",
-        &loadLibraryAddress,
-        NULL
-    );
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-        
-    status = PhGetProcedureAddressRemote(
-        ProcessHandle,
-        &runtimeLibrary->Kernel32FileName,
-        "GetProcAddress", 
-        &getProcAddressAddress,
-        NULL
-    );
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-    
-    manualInject.fnLoadLibraryA = (pLoadLibraryA)loadLibraryAddress;
-    manualInject.fnGetProcAddress = (pGetProcAddress)getProcAddressAddress;
+    // Temporarily use direct function pointers like AmalgamLoader to test
+    manualInject.fnLoadLibraryA = LoadLibraryA;
+    manualInject.fnGetProcAddress = GetProcAddress;
 
     status = NtWriteVirtualMemory(ProcessHandle, loaderMemory, &manualInject, sizeof(manualInject), NULL);
     if (!NT_SUCCESS(status))
