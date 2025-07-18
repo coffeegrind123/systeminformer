@@ -2211,14 +2211,6 @@ NTSTATUS PhLoadDllProcess(
     _In_opt_ ULONG Timeout
     )
 {
-    NTSTATUS status;
-    HANDLE threadHandle = NULL;
-    HANDLE powerRequestHandle = NULL;
-    PVOID dllPathMemory = NULL;
-    PVOID loadLibrary = NULL;
-    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
-    PPH_STRING dllPathString = NULL;
-
     UNREFERENCED_PARAMETER(FileName);
     UNREFERENCED_PARAMETER(LoadDllUsingApcThread);
 
@@ -2247,93 +2239,242 @@ NTSTATUS PhLoadDllProcess(
     swprintf_s(dllPath, MAX_PATH, L"%s\\%s", exePath, findData.cFileName);
     FindClose(findHandle);
 
-    // Convert to PH_STRING for SystemInformer APIs
-    dllPathString = PhCreateString(dllPath);
-    if (!dllPathString)
-        return STATUS_INSUFFICIENT_RESOURCES;
+    // Now use AmalgamLoader's 1:1 implementation
+    HANDLE hFile;
+    DWORD FileSize, read, i;
+    PVOID buffer, image;
+    PIMAGE_DOS_HEADER pIDH;
+    PIMAGE_NT_HEADERS pINH;
+    MANUAL_INJECT ManualInject;
+    PVOID mem1;
+    HANDLE hThread;
 
-    // Use SystemInformer's proven LoadLibrary injection method
-    status = PhGetProcessRuntimeLibrary(ProcessHandle, &runtimeLibrary, NULL);
+    // Load DLL file into buffer (AmalgamLoader style)
+    hFile = CreateFileW(dllPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+        return STATUS_UNSUCCESSFUL;
+
+    FileSize = GetFileSize(hFile, NULL);
+    buffer = VirtualAlloc(NULL, FileSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!buffer)
+    {
+        CloseHandle(hFile);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    if (!ReadFile(hFile, buffer, FileSize, &read, NULL))
+    {
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hFile);
+        return STATUS_UNSUCCESSFUL;
+    }
+    CloseHandle(hFile);
+
+    // PE validation (AmalgamLoader style)
+    pIDH = (PIMAGE_DOS_HEADER)buffer;
+    if (pIDH->e_magic != IMAGE_DOS_SIGNATURE)
+    {
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_INVALID_IMAGE_FORMAT;
+    }
+
+    pINH = (PIMAGE_NT_HEADERS)((LPBYTE)buffer + pIDH->e_lfanew);
+    if (pINH->Signature != IMAGE_NT_SIGNATURE)
+    {
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_INVALID_IMAGE_FORMAT;
+    }
+
+    if (!(pINH->FileHeader.Characteristics & IMAGE_FILE_DLL))
+    {
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_INVALID_IMAGE_FORMAT;
+    }
+
+    // Allocate memory in target process (AmalgamLoader style)
+    image = VirtualAllocEx(ProcessHandle, NULL, pINH->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!image)
+    {
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    // Copy PE header (AmalgamLoader style)
+    if (!WriteProcessMemory(ProcessHandle, image, buffer, 0x1000, NULL))
+    {
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    // Copy sections (AmalgamLoader style)
+    PIMAGE_SECTION_HEADER pSectionHeader = IMAGE_FIRST_SECTION(pINH);
+    for (i = 0; i < pINH->FileHeader.NumberOfSections; i++)
+    {
+        if (pSectionHeader->PointerToRawData)
+        {
+            WriteProcessMemory(ProcessHandle, 
+                (PVOID)((LPBYTE)image + pSectionHeader->VirtualAddress), 
+                (PVOID)((LPBYTE)buffer + pSectionHeader->PointerToRawData), 
+                pSectionHeader->SizeOfRawData, NULL);
+        }
+        pSectionHeader++;
+    }
+
+    // Calculate loader size (AmalgamLoader style)
+    DWORD64 loadDllSize = (DWORD64)LoadDllEnd - (DWORD64)LoadDll;
+    if (loadDllSize <= 0 || loadDllSize > 0x10000)
+        loadDllSize = 2048;
+    
+    DWORD totalLoaderSize = (DWORD)(sizeof(MANUAL_INJECT) + loadDllSize + 512);
+    
+    mem1 = VirtualAllocEx(ProcessHandle, NULL, totalLoaderSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!mem1)
+    {
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    // Setup ManualInject structure (AmalgamLoader style)
+    memset(&ManualInject, 0, sizeof(MANUAL_INJECT));
+    ManualInject.ImageBase = image;
+    ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
+    ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+    ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    // Get function addresses in target process context using SystemInformer's robust method
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
+    NTSTATUS status = PhGetProcessRuntimeLibrary(ProcessHandle, &runtimeLibrary, NULL);
     if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return status;
+    }
+    
+    PVOID loadLibraryAddress = NULL;
+    PVOID getProcAddressAddress = NULL;
+    
     status = PhGetProcedureAddressRemote(
         ProcessHandle,
         &runtimeLibrary->Kernel32FileName,
-        "LoadLibraryW",
-        &loadLibrary,
+        "LoadLibraryA",
+        &loadLibraryAddress,
         NULL
     );
     if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Allocate memory for DLL path in target process
-    SIZE_T pathSize = dllPathString->Length + sizeof(UNICODE_NULL);
-    status = NtAllocateVirtualMemory(
-        ProcessHandle,
-        &dllPathMemory,
-        0,
-        &pathSize,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE
-    );
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Write DLL path to target process
-    status = NtWriteVirtualMemory(
-        ProcessHandle,
-        dllPathMemory,
-        dllPathString->Buffer,
-        dllPathString->Length + sizeof(UNICODE_NULL),
-        NULL
-    );
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Create execution request to prevent system sleep
-    if (WindowsVersion >= WINDOWS_8)
     {
-        PhCreateExecutionRequiredRequest(ProcessHandle, &powerRequestHandle);
-    }
-
-    // Create remote thread to call LoadLibraryW
-    status = PhCreateUserThread(
-        ProcessHandle,
-        NULL,
-        THREAD_ALL_ACCESS,
-        0,
-        0,
-        0,
-        0,
-        loadLibrary,
-        dllPathMemory,
-        &threadHandle,
-        NULL
-    );
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    // Wait for completion
-    status = PhWaitForSingleObject(threadHandle, Timeout ? Timeout : 10000);
-
-CleanupExit:
-    if (threadHandle)
-        NtClose(threadHandle);
-    
-    if (powerRequestHandle)
-        PhDestroyExecutionRequiredRequest(powerRequestHandle);
-    
-    if (dllPathMemory)
-    {
-        SIZE_T regionSize = 0;
-        NtFreeVirtualMemory(ProcessHandle, &dllPathMemory, &regionSize, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return status;
     }
     
-    if (dllPathString)
-        PhDereferenceObject(dllPathString);
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        &runtimeLibrary->Kernel32FileName,
+        "GetProcAddress",
+        &getProcAddressAddress,
+        NULL
+    );
+    if (!NT_SUCCESS(status))
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return status;
+    }
+    
+    // Validate function addresses before using them
+    if (!loadLibraryAddress || !getProcAddressAddress)
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
 
-    return status;
+    ManualInject.fnLoadLibraryA = (pLoadLibraryA)loadLibraryAddress;
+    ManualInject.fnGetProcAddress = (pGetProcAddress)getProcAddressAddress;
+
+    // Write ManualInject structure (AmalgamLoader style)
+    if (!WriteProcessMemory(ProcessHandle, mem1, &ManualInject, sizeof(MANUAL_INJECT), NULL))
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    // Write LoadDll function (AmalgamLoader style) - Fix pointer arithmetic
+    PVOID functionAddress = (PVOID)((LPBYTE)mem1 + sizeof(MANUAL_INJECT));
+    if (!WriteProcessMemory(ProcessHandle, functionAddress, LoadDll, (SIZE_T)loadDllSize, NULL))
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    // Create remote thread (AmalgamLoader style)
+    hThread = CreateRemoteThread(ProcessHandle, NULL, 0, (LPTHREAD_START_ROUTINE)functionAddress, mem1, 0, NULL);
+    if (!hThread)
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    // Wait for completion with error checking
+    DWORD waitResult = WaitForSingleObject(hThread, Timeout ? Timeout : 10000);
+    
+    // Check thread exit code for debugging
+    DWORD threadExitCode = 0;
+    GetExitCodeThread(hThread, &threadExitCode);
+    CloseHandle(hThread);
+    
+    // Read back the status to see what happened
+    MANUAL_INJECT statusCheck;
+    if (ReadProcessMemory(ProcessHandle, mem1, &statusCheck, sizeof(statusCheck), NULL))
+    {
+        // Check for specific error codes from AmalgamLoader
+        if (statusCheck.hMod == (HINSTANCE)0x404)
+        {
+            // Module loading failed - this means the crash happened in LoadLibraryA call
+            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            return STATUS_UNSUCCESSFUL; // LoadLibraryA failed
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x405 || statusCheck.hMod == (HINSTANCE)0x406)
+        {
+            // Import resolution failed - crash in GetProcAddress calls
+            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            return STATUS_UNSUCCESSFUL; // GetProcAddress failed
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x407)
+        {
+            // DLL main returned FALSE
+            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            return STATUS_UNSUCCESSFUL; // DLL main failed
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x408)
+        {
+            // DLL main crashed
+            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            return STATUS_UNSUCCESSFUL; // DLL main crashed
+        }
+    }
+
+    // Cleanup loader memory but keep DLL loaded (AmalgamLoader style)
+    VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+    VirtualFree(buffer, 0, MEM_RELEASE);
+
+    return (waitResult == WAIT_OBJECT_0) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
 }
 
 
