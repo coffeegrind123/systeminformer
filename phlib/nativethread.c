@@ -1979,126 +1979,133 @@ typedef struct _MANUAL_INJECT
 
 DWORD WINAPI ManualMapShellcode(PVOID p)
 {
-    PMANUAL_INJECT ManualInject = (PMANUAL_INJECT)p;
+    PMANUAL_INJECT ManualInject;
+
+    HMODULE hModule;
+    DWORD64 i, Function, count, delta;
     
-    if (!ManualInject)
+    DWORD64* ptr;
+    PWORD list;
+
+    PIMAGE_BASE_RELOCATION pIBR;
+    PIMAGE_IMPORT_DESCRIPTOR pIID;
+    PIMAGE_IMPORT_BY_NAME pIBN;
+
+    PDLL_MAIN EntryPoint;
+
+    ManualInject = (PMANUAL_INJECT)p;
+
+    // Validate input parameter - return FALSE if invalid
+    if (!ManualInject) {
         return FALSE;
+    }
 
-    PIMAGE_BASE_RELOCATION pIBR = ManualInject->BaseRelocation;
-    ULONG_PTR delta = (ULONG_PTR)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
+    // ====================================================================
+    // STEP 2: HANDLE RELOCATIONS
+    // ====================================================================
+    pIBR = ManualInject->BaseRelocation;
+    delta = (DWORD64)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
 
+    // Only process relocations if they exist and delta is not zero
     if (pIBR && delta != 0)
     {
+        // Each relocation block contains multiple relocation entries
         while (pIBR->VirtualAddress)
         {
             if (pIBR->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
             {
-                DWORD count = (pIBR->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
-                PWORD list = (PWORD)(pIBR + 1);
+                // Calculate number of relocations in this block
+                // Each relocation entry is 2 bytes (WORD), subtract the 8-byte block header
+                count = (pIBR->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+                list = (PWORD)(pIBR + 1); // Point to first relocation entry after header
 
-                for (DWORD i = 0; i < count; i++)
+                // Process each relocation entry in this block
+                for (i = 0; i < count; i++)
                 {
                     if (list[i])
                     {
+                        // Extract relocation type (upper 4 bits) and offset (lower 12 bits)
                         WORD type = (list[i] >> 12) & 0xF;
                         WORD offset = list[i] & 0xFFF;
                         
-                        if (type == IMAGE_REL_BASED_HIGHLOW || type == IMAGE_REL_BASED_DIR64)
+                        // For 64-bit, we only handle IMAGE_REL_BASED_DIR64 relocations
+                        if (type == IMAGE_REL_BASED_DIR64)
                         {
-#ifdef _WIN64
-                            if (type == IMAGE_REL_BASED_DIR64)
-                            {
-                                ULONG_PTR* ptr = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
-                                *ptr += delta;
-                            }
-#else
-                            if (type == IMAGE_REL_BASED_HIGHLOW)
-                            {
-                                ULONG_PTR* ptr = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
-                                *ptr += delta;
-                            }
-#endif
+                            // Apply delta to the 64-bit address at this location
+                            ptr = (DWORD64*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
+                            *ptr += delta;
                         }
+                        // Ignore other relocation types for 64-bit loader
                     }
                 }
             }
+
+            // Move to next relocation block
             pIBR = (PIMAGE_BASE_RELOCATION)((LPBYTE)pIBR + pIBR->SizeOfBlock);
         }
     }
 
-    PIMAGE_IMPORT_DESCRIPTOR pIID = ManualInject->ImportDirectory;
+    // ====================================================================
+    // STEP 3: HANDLE IMPORTS
+    // ====================================================================
+    pIID = ManualInject->ImportDirectory;
 
     if (pIID)
     {
         while (pIID->Name)
         {
-            if (pIID->OriginalFirstThunk == 0 && pIID->FirstThunk == 0)
-                break;
-                
-            ULONG_PTR* pThunk = NULL;
-            ULONG_PTR* pFunc = NULL;
-            
-            if (pIID->OriginalFirstThunk)
-                pThunk = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
-            if (pIID->FirstThunk)
-                pFunc = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
+            // Get pointers to the thunk tables (exactly like AmalgamLoader)
+            DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
+            DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
 
-            if (!pThunk) 
-                pThunk = pFunc;
-            if (!pFunc)
-                pFunc = pThunk;
-                
-            if (!pThunk || !pFunc)
-            {
-                pIID++;
-                continue;
-            }
+            // If OriginalFirstThunk not defined, use FirstThunk (as per AmalgamLoader)
+            if (!pThunk) { pThunk = pFunc; }
 
+            // Load the required DLL module
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
             HMODULE hModule = ManualInject->fnLoadLibraryA(importName);
 
             if (!hModule)
             {
-                ManualInject->hMod = (HINSTANCE)0x404;
+                ManualInject->hMod = (HINSTANCE)0x404; // Module loading failed
                 return FALSE;
             }
 
+            // Process each function import in this DLL (exactly like AmalgamLoader)
             for (; *pThunk; ++pThunk, ++pFunc)
             {
-                ULONG_PTR Function;
-#ifdef _WIN64
                 if (*pThunk & IMAGE_ORDINAL_FLAG64)
                 {
-                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    // Import by ordinal (64-bit) - function imported by number
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    if (!Function)
+                    {
+                        ManualInject->hMod = (HINSTANCE)0x405; // Ordinal import failed
+                        return FALSE;
+                    }
+                    *pFunc = Function; // Update IAT with function address
                 }
                 else
                 {
-                    PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
-                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    // Import by name (64-bit) - function imported by name
+                    pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    if (!Function)
+                    {
+                        ManualInject->hMod = (HINSTANCE)0x406; // Name import failed
+                        return FALSE;
+                    }
+                    *pFunc = Function; // Update IAT with function address
                 }
-#else
-                if (*pThunk & IMAGE_ORDINAL_FLAG32)
-                {
-                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
-                }
-                else
-                {
-                    PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
-                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
-                }
-#endif
-                
-                if (!Function)
-                {
-                    ManualInject->hMod = (HINSTANCE)0x405;
-                    return FALSE;
-                }
-                *pFunc = Function;
             }
-            pIID++;
+
+            pIID++; // Move to next import descriptor
         }
     }
 
+    // ====================================================================
+    // STEP 4: EXECUTE TLS CALLBACKS
+    // ====================================================================
     if (ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size)
     {
         PIMAGE_TLS_DIRECTORY64 pTLS = (PIMAGE_TLS_DIRECTORY64)((LPBYTE)ManualInject->ImageBase + 
@@ -2107,6 +2114,7 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
         if (pTLS && pTLS->AddressOfCallBacks)
         {
             PIMAGE_TLS_CALLBACK* pCallback = (PIMAGE_TLS_CALLBACK*)pTLS->AddressOfCallBacks;
+            // Execute each TLS callback with DLL_PROCESS_ATTACH
             for (; pCallback && *pCallback; ++pCallback)
             {
                 (*pCallback)((LPVOID)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
@@ -2114,18 +2122,27 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
         }
     }
 
+    // ====================================================================
+    // STEP 5: CALL DLL MAIN
+    // ====================================================================
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
-        PDLL_MAIN EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
+        // Get pointer to DLL entry point
+        EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
         
+        // Call entry point with proper error handling
         __try
         {
             BOOL result = EntryPoint((HMODULE)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
+            
+            // Set status for debugging purposes
             ManualInject->hMod = result ? (HINSTANCE)ManualInject->ImageBase : (HINSTANCE)0x407;
+            
             return result;
         }
         __except(EXCEPTION_EXECUTE_HANDLER)
         {
+            // DLL entry point crashed
             ManualInject->hMod = (HINSTANCE)0x408;
             return FALSE;
         }
