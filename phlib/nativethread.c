@@ -2127,7 +2127,7 @@ NTSTATUS PhLoadDllProcess(
     PVOID imageBase = NULL;
     PVOID loaderMemory = NULL;
     HANDLE threadHandle = NULL;
-    LARGE_INTEGER fileSize;
+    FILE_STANDARD_INFORMATION fileInfo;
     IO_STATUS_BLOCK iosb;
     PIMAGE_DOS_HEADER dosHeader;
     PIMAGE_NT_HEADERS ntHeaders;
@@ -2161,11 +2161,11 @@ NTSTATUS PhLoadDllProcess(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
-    status = NtQueryInformationFile(fileHandle, &iosb, &fileSize, sizeof(fileSize), FileStandardInformation);
+    status = NtQueryInformationFile(fileHandle, &iosb, &fileInfo, sizeof(fileInfo), FileStandardInformation);
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
-    SIZE_T bufferSize = (SIZE_T)fileSize.QuadPart;
+    SIZE_T bufferSize = (SIZE_T)fileInfo.EndOfFile.QuadPart;
     status = NtAllocateVirtualMemory(
         NtCurrentProcess(),
         &fileBuffer,
@@ -2178,7 +2178,7 @@ NTSTATUS PhLoadDllProcess(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
-    status = NtReadFile(fileHandle, NULL, NULL, NULL, &iosb, fileBuffer, (ULONG)fileSize.QuadPart, NULL, NULL);
+    status = NtReadFile(fileHandle, NULL, NULL, NULL, &iosb, fileBuffer, (ULONG)fileInfo.EndOfFile.QuadPart, NULL, NULL);
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
