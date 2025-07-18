@@ -2255,6 +2255,34 @@ NTSTATUS PhLoadDllProcess(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
+    PVOID remoteLoadLibraryA = NULL;
+    PVOID remoteGetProcAddress = NULL;
+
+    status = PhGetProcessRuntimeLibrary(ProcessHandle, &runtimeLibrary, NULL);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        &runtimeLibrary->Kernel32FileName,
+        "LoadLibraryA",
+        &remoteLoadLibraryA,
+        NULL
+        );
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        &runtimeLibrary->Kernel32FileName,
+        "GetProcAddress", 
+        &remoteGetProcAddress,
+        NULL
+        );
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
     RtlZeroMemory(&manualInject, sizeof(manualInject));
     manualInject.ImageBase = imageBase;
     manualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)imageBase + dosHeader->e_lfanew);
@@ -2262,8 +2290,8 @@ NTSTATUS PhLoadDllProcess(
         ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
     manualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageBase + 
         ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    manualInject.fnLoadLibraryA = LoadLibraryA;
-    manualInject.fnGetProcAddress = GetProcAddress;
+    manualInject.fnLoadLibraryA = (pLoadLibraryA)remoteLoadLibraryA;
+    manualInject.fnGetProcAddress = (pGetProcAddress)remoteGetProcAddress;
 
     status = NtWriteVirtualMemory(ProcessHandle, loaderMemory, &manualInject, sizeof(manualInject), NULL);
     if (!NT_SUCCESS(status))
@@ -2292,6 +2320,34 @@ NTSTATUS PhLoadDllProcess(
         goto CleanupExit;
 
     status = PhWaitForSingleObject(threadHandle, Timeout);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+
+    DWORD threadExitCode;
+    if (NT_SUCCESS(NtQueryInformationThread(threadHandle, ThreadBasicInformation, &threadExitCode, sizeof(threadExitCode), NULL)))
+    {
+        if (threadExitCode == 0)
+        {
+            status = STATUS_UNSUCCESSFUL;
+            goto CleanupExit;
+        }
+    }
+
+    MANUAL_INJECT statusCheck;
+    if (NT_SUCCESS(NtReadVirtualMemory(ProcessHandle, loaderMemory, &statusCheck, sizeof(statusCheck), NULL)))
+    {
+        if (statusCheck.hMod == (HINSTANCE)0x404 ||
+            statusCheck.hMod == (HINSTANCE)0x405 ||
+            statusCheck.hMod == (HINSTANCE)0x406 ||
+            statusCheck.hMod == (HINSTANCE)0x407 ||
+            statusCheck.hMod == (HINSTANCE)0x408)
+        {
+            status = STATUS_UNSUCCESSFUL;
+            goto CleanupExit;
+        }
+    }
+
+    PhDelayExecution(FALSE, 2000);
 
 CleanupExit:
     if (threadHandle)
