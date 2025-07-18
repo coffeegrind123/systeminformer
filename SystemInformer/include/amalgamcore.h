@@ -22,5 +22,5 @@ typedef struct _MANUAL_INJECT
 } MANUAL_INJECT, * PMANUAL_INJECT;
 
 // Pure manual mapping functions
-DWORD GetProcessIdByName(const wchar_t* processName);
-int ManualMapInject(const wchar_t* dllPath, DWORD processId);
+DWORD WINAPI GetProcessIdByName(const wchar_t* processName);
+int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId);

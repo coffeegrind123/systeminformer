@@ -144,7 +144,7 @@ DWORD WINAPI LoadDllEnd()
     return 0;
 }
 
-DWORD GetProcessIdByName(const wchar_t* processName)
+DWORD WINAPI GetProcessIdByName(const wchar_t* processName)
 {
     PROCESSENTRY32 entry;
     entry.dwSize = sizeof(PROCESSENTRY32);
@@ -166,7 +166,7 @@ DWORD GetProcessIdByName(const wchar_t* processName)
     return 0;
 }
 
-int ManualMapInject(const wchar_t* dllPath, DWORD processId)
+int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
 {
     HANDLE hProcess, hThread, hFile;
     PVOID mem1;
