@@ -16,23 +16,10 @@ DWORD WINAPI LoadDll(PVOID p)
     PIMAGE_IMPORT_BY_NAME pIBN;
     PDLL_MAIN EntryPoint;
 
-    // Validate the parameter pointer itself first
-    __try
-    {
-        ManualInject = (PMANUAL_INJECT)p;
-        if (!ManualInject) {
-            return FALSE;
-        }
+    ManualInject = (PMANUAL_INJECT)p;
 
-        // Validate critical pointers before use
-        if (!ManualInject->ImageBase || !ManualInject->NtHeaders) {
-            ManualInject->hMod = (HINSTANCE)0x409; // Invalid pointers
-            return FALSE;
-        }
-    }
-    __except(EXCEPTION_EXECUTE_HANDLER)
-    {
-        return FALSE; // Invalid parameter pointer
+    if (!ManualInject) {
+        return FALSE;
     }
 
     // Handle relocations
@@ -41,38 +28,29 @@ DWORD WINAPI LoadDll(PVOID p)
 
     if (pIBR && delta != 0)
     {
-        // Validate base relocation table before processing
-        __try
+        while (pIBR->VirtualAddress)
         {
-            while (pIBR->VirtualAddress)
+            if (pIBR->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
             {
-                if (pIBR->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
-                {
-                    count = (pIBR->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
-                    list = (PWORD)(pIBR + 1);
+                count = (pIBR->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+                list = (PWORD)(pIBR + 1);
 
-                    for (i = 0; i < count; i++)
+                for (i = 0; i < count; i++)
+                {
+                    if (list[i])
                     {
-                        if (list[i])
+                        WORD type = (list[i] >> 12) & 0xF;
+                        WORD offset = list[i] & 0xFFF;
+                        
+                        if (type == IMAGE_REL_BASED_DIR64)
                         {
-                            WORD type = (list[i] >> 12) & 0xF;
-                            WORD offset = list[i] & 0xFFF;
-                            
-                            if (type == IMAGE_REL_BASED_DIR64)
-                            {
-                                ptr = (DWORD64*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
-                                *ptr += delta;
-                            }
+                            ptr = (DWORD64*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
+                            *ptr += delta;
                         }
                     }
                 }
-                pIBR = (PIMAGE_BASE_RELOCATION)((LPBYTE)pIBR + pIBR->SizeOfBlock);
             }
-        }
-        __except(EXCEPTION_EXECUTE_HANDLER)
-        {
-            ManualInject->hMod = (HINSTANCE)0x40A; // Relocation failed
-            return FALSE;
+            pIBR = (PIMAGE_BASE_RELOCATION)((LPBYTE)pIBR + pIBR->SizeOfBlock);
         }
     }
 
@@ -81,56 +59,48 @@ DWORD WINAPI LoadDll(PVOID p)
 
     if (pIID)
     {
-        __try
+        while (pIID->Name)
         {
-            while (pIID->Name)
+            DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
+            DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
+
+            if (!pThunk) { pThunk = pFunc; }
+
+            char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
+            hModule = ManualInject->fnLoadLibraryA(importName);
+
+            if (!hModule)
             {
-                DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
-                DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
-
-                if (!pThunk) { pThunk = pFunc; }
-
-                char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
-                hModule = ManualInject->fnLoadLibraryA(importName);
-
-                if (!hModule)
-                {
-                    ManualInject->hMod = (HINSTANCE)0x404;
-                    return FALSE;
-                }
-
-                for (; *pThunk; ++pThunk, ++pFunc)
-                {
-                    if (*pThunk & IMAGE_ORDINAL_FLAG64)
-                    {
-                        Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
-                        if (!Function)
-                        {
-                            ManualInject->hMod = (HINSTANCE)0x405;
-                            return FALSE;
-                        }
-                        *pFunc = Function;
-                    }
-                    else
-                    {
-                        pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
-                        Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
-                        if (!Function)
-                        {
-                            ManualInject->hMod = (HINSTANCE)0x406;
-                            return FALSE;
-                        }
-                        *pFunc = Function;
-                    }
-                }
-
-                pIID++;
+                ManualInject->hMod = (HINSTANCE)0x404;
+                return FALSE;
             }
-        }
-        __except(EXCEPTION_EXECUTE_HANDLER)
-        {
-            ManualInject->hMod = (HINSTANCE)0x40B; // Import resolution failed
-            return FALSE;
+
+            for (; *pThunk; ++pThunk, ++pFunc)
+            {
+                if (*pThunk & IMAGE_ORDINAL_FLAG64)
+                {
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    if (!Function)
+                    {
+                        ManualInject->hMod = (HINSTANCE)0x405;
+                        return FALSE;
+                    }
+                    *pFunc = Function;
+                }
+                else
+                {
+                    pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    if (!Function)
+                    {
+                        ManualInject->hMod = (HINSTANCE)0x406;
+                        return FALSE;
+                    }
+                    *pFunc = Function;
+                }
+            }
+
+            pIID++;
         }
     }
 
@@ -534,33 +504,6 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x408) {
             AmalgamLog("LoadDll function failed - DLL entry point crashed");
-            CloseHandle(hThread);
-            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
-            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
-            VirtualFree(buffer, 0, MEM_RELEASE);
-            CloseHandle(hProcess);
-            return -1;
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x409) {
-            AmalgamLog("LoadDll function failed - invalid structure pointers");
-            CloseHandle(hThread);
-            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
-            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
-            VirtualFree(buffer, 0, MEM_RELEASE);
-            CloseHandle(hProcess);
-            return -1;
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x40A) {
-            AmalgamLog("LoadDll function failed - relocation processing crashed");
-            CloseHandle(hThread);
-            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
-            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
-            VirtualFree(buffer, 0, MEM_RELEASE);
-            CloseHandle(hProcess);
-            return -1;
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x40B) {
-            AmalgamLog("LoadDll function failed - import resolution crashed");
             CloseHandle(hThread);
             VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
             VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
