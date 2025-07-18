@@ -1,7 +1,7 @@
+#include <phapp.h>
 #include <amalgamcore.h>
 
-// Forward declare RtlAdjustPrivilege for debug privileges
-extern "C" NTSTATUS NTAPI RtlAdjustPrivilege(ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled);
+// RtlAdjustPrivilege is already declared in phlib headers
 
 // Position-independent shellcode function
 DWORD WINAPI LoadDll(PVOID p)
