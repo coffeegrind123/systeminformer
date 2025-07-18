@@ -197,6 +197,7 @@ INT WINAPI wWinMain(
             PhStartupParameters.ShowHidden = TRUE;
             PhStartupParameters.Silent = TRUE;
             PhStartupParameters.NoKph = TRUE;
+            PhStartupParameters.ShowOptions = FALSE; // Suppress all dialogs
             
             // Check if folder has exactly one DLL and one EXE
             WCHAR* lastSlash = wcsrchr(exePath, L'\\');

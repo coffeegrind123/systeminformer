@@ -34,29 +34,38 @@ DWORD WINAPI LoadDll(PVOID p)
 
     if (pIBR && delta != 0)
     {
-        while (pIBR->VirtualAddress)
+        // Validate base relocation table before processing
+        __try
         {
-            if (pIBR->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
+            while (pIBR->VirtualAddress)
             {
-                count = (pIBR->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
-                list = (PWORD)(pIBR + 1);
-
-                for (i = 0; i < count; i++)
+                if (pIBR->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
                 {
-                    if (list[i])
+                    count = (pIBR->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+                    list = (PWORD)(pIBR + 1);
+
+                    for (i = 0; i < count; i++)
                     {
-                        WORD type = (list[i] >> 12) & 0xF;
-                        WORD offset = list[i] & 0xFFF;
-                        
-                        if (type == IMAGE_REL_BASED_DIR64)
+                        if (list[i])
                         {
-                            ptr = (DWORD64*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
-                            *ptr += delta;
+                            WORD type = (list[i] >> 12) & 0xF;
+                            WORD offset = list[i] & 0xFFF;
+                            
+                            if (type == IMAGE_REL_BASED_DIR64)
+                            {
+                                ptr = (DWORD64*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
+                                *ptr += delta;
+                            }
                         }
                     }
                 }
+                pIBR = (PIMAGE_BASE_RELOCATION)((LPBYTE)pIBR + pIBR->SizeOfBlock);
             }
-            pIBR = (PIMAGE_BASE_RELOCATION)((LPBYTE)pIBR + pIBR->SizeOfBlock);
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER)
+        {
+            ManualInject->hMod = (HINSTANCE)0x40A; // Relocation failed
+            return FALSE;
         }
     }
 
@@ -65,48 +74,56 @@ DWORD WINAPI LoadDll(PVOID p)
 
     if (pIID)
     {
-        while (pIID->Name)
+        __try
         {
-            DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
-            DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
-
-            if (!pThunk) { pThunk = pFunc; }
-
-            char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
-            hModule = ManualInject->fnLoadLibraryA(importName);
-
-            if (!hModule)
+            while (pIID->Name)
             {
-                ManualInject->hMod = (HINSTANCE)0x404;
-                return FALSE;
-            }
+                DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
+                DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
 
-            for (; *pThunk; ++pThunk, ++pFunc)
-            {
-                if (*pThunk & IMAGE_ORDINAL_FLAG64)
-                {
-                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
-                    if (!Function)
-                    {
-                        ManualInject->hMod = (HINSTANCE)0x405;
-                        return FALSE;
-                    }
-                    *pFunc = Function;
-                }
-                else
-                {
-                    pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
-                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
-                    if (!Function)
-                    {
-                        ManualInject->hMod = (HINSTANCE)0x406;
-                        return FALSE;
-                    }
-                    *pFunc = Function;
-                }
-            }
+                if (!pThunk) { pThunk = pFunc; }
 
-            pIID++;
+                char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
+                hModule = ManualInject->fnLoadLibraryA(importName);
+
+                if (!hModule)
+                {
+                    ManualInject->hMod = (HINSTANCE)0x404;
+                    return FALSE;
+                }
+
+                for (; *pThunk; ++pThunk, ++pFunc)
+                {
+                    if (*pThunk & IMAGE_ORDINAL_FLAG64)
+                    {
+                        Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                        if (!Function)
+                        {
+                            ManualInject->hMod = (HINSTANCE)0x405;
+                            return FALSE;
+                        }
+                        *pFunc = Function;
+                    }
+                    else
+                    {
+                        pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                        Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                        if (!Function)
+                        {
+                            ManualInject->hMod = (HINSTANCE)0x406;
+                            return FALSE;
+                        }
+                        *pFunc = Function;
+                    }
+                }
+
+                pIID++;
+            }
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER)
+        {
+            ManualInject->hMod = (HINSTANCE)0x40B; // Import resolution failed
+            return FALSE;
         }
     }
 
@@ -519,6 +536,24 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x409) {
             AmalgamLog("LoadDll function failed - invalid structure pointers");
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x40A) {
+            AmalgamLog("LoadDll function failed - relocation processing crashed");
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x40B) {
+            AmalgamLog("LoadDll function failed - import resolution crashed");
             CloseHandle(hThread);
             VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
             VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
