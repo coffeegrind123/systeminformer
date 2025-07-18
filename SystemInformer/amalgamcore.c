@@ -67,6 +67,7 @@ DWORD WINAPI LoadDll(PVOID p)
 
     if (pIID)
     {
+        ManualInject->hMod = (HINSTANCE)0x1239; // Starting import processing
         while (pIID->Name)
         {
             DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
@@ -75,7 +76,9 @@ DWORD WINAPI LoadDll(PVOID p)
             if (!pThunk) { pThunk = pFunc; }
 
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
+            ManualInject->hMod = (HINSTANCE)0x123A; // Before LoadLibraryA call
             hModule = ManualInject->fnLoadLibraryA(importName);
+            ManualInject->hMod = (HINSTANCE)0x123B; // After LoadLibraryA call
 
             if (!hModule)
             {
@@ -520,7 +523,16 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
             AmalgamLog("LoadDll function crashed during relocation processing");
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1238) {
-            AmalgamLog("LoadDll function crashed after relocations, during imports");
+            AmalgamLog("LoadDll function crashed after relocations, before import processing");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1239) {
+            AmalgamLog("LoadDll function crashed during import directory access");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x123A) {
+            AmalgamLog("LoadDll function crashed during LoadLibraryA call");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x123B) {
+            AmalgamLog("LoadDll function crashed after LoadLibraryA, during GetProcAddress");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
