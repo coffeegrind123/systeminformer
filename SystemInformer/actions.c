@@ -3317,8 +3317,8 @@ BOOLEAN PhUiLoadDllProcess(
     HANDLE findHandle = INVALID_HANDLE_VALUE;
     WIN32_FIND_DATA findData;
     
-    // Get SystemInformer's own executable path
-    processFileName = PhGetApplicationFileName();
+    // Get SystemInformer's own executable path (Win32 format for FindFirstFile)
+    processFileName = PhGetApplicationFileNameWin32();
     
     if (!processFileName)
     {
@@ -3341,6 +3341,11 @@ BOOLEAN PhUiLoadDllProcess(
     
     // Create search pattern for DLL files
     searchPattern = PhConcatStrings(3, processDirectory->Buffer, L"\\", L"*.dll");
+    
+    // Debug: Show the search path
+    WCHAR debugMessage[512];
+    swprintf_s(debugMessage, 512, L"Searching for DLL files in: %s", searchPattern->Buffer);
+    MessageBox(WindowHandle, debugMessage, L"Debug - DLL Search Path", MB_OK);
     
     // Find first DLL file in the directory
     findHandle = FindFirstFile(searchPattern->Buffer, &findData);
