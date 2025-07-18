@@ -2347,7 +2347,7 @@ NTSTATUS PhLoadDllProcess(
         }
     }
 
-    PhDelayExecution(FALSE, 2000);
+    PhDelayExecution(2000);
 
 CleanupExit:
     if (threadHandle)
