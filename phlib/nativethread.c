@@ -1985,7 +1985,7 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
         return FALSE;
 
     PIMAGE_BASE_RELOCATION pIBR = ManualInject->BaseRelocation;
-    DWORD64 delta = (DWORD64)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
+    ULONG_PTR delta = (ULONG_PTR)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
 
     if (pIBR && delta != 0)
     {
@@ -2003,10 +2003,21 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
                         WORD type = (list[i] >> 12) & 0xF;
                         WORD offset = list[i] & 0xFFF;
                         
-                        if (type == IMAGE_REL_BASED_DIR64)
+                        if (type == IMAGE_REL_BASED_HIGHLOW || type == IMAGE_REL_BASED_DIR64)
                         {
-                            DWORD64* ptr = (DWORD64*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
-                            *ptr += delta;
+#ifdef _WIN64
+                            if (type == IMAGE_REL_BASED_DIR64)
+                            {
+                                ULONG_PTR* ptr = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
+                                *ptr += delta;
+                            }
+#else
+                            if (type == IMAGE_REL_BASED_HIGHLOW)
+                            {
+                                ULONG_PTR* ptr = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + (pIBR->VirtualAddress + offset));
+                                *ptr += delta;
+                            }
+#endif
                         }
                     }
                 }
@@ -2021,11 +2032,27 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
     {
         while (pIID->Name)
         {
-            DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
-            DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
+            if (pIID->OriginalFirstThunk == 0 && pIID->FirstThunk == 0)
+                break;
+                
+            ULONG_PTR* pThunk = NULL;
+            ULONG_PTR* pFunc = NULL;
+            
+            if (pIID->OriginalFirstThunk)
+                pThunk = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
+            if (pIID->FirstThunk)
+                pFunc = (ULONG_PTR*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
 
             if (!pThunk) 
                 pThunk = pFunc;
+            if (!pFunc)
+                pFunc = pThunk;
+                
+            if (!pThunk || !pFunc)
+            {
+                pIID++;
+                continue;
+            }
 
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
             HMODULE hModule = ManualInject->fnLoadLibraryA(importName);
@@ -2038,16 +2065,28 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
 
             for (; *pThunk; ++pThunk, ++pFunc)
             {
-                DWORD64 Function;
+                ULONG_PTR Function;
+#ifdef _WIN64
                 if (*pThunk & IMAGE_ORDINAL_FLAG64)
                 {
-                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
                 }
                 else
                 {
                     PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
-                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
                 }
+#else
+                if (*pThunk & IMAGE_ORDINAL_FLAG32)
+                {
+                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                }
+                else
+                {
+                    PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                    Function = (ULONG_PTR)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                }
+#endif
                 
                 if (!Function)
                 {
@@ -2286,10 +2325,27 @@ NTSTATUS PhLoadDllProcess(
     RtlZeroMemory(&manualInject, sizeof(manualInject));
     manualInject.ImageBase = imageBase;
     manualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)imageBase + dosHeader->e_lfanew);
-    manualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)imageBase + 
-        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-    manualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageBase + 
-        ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    
+    if (ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress)
+    {
+        manualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)imageBase + 
+            ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+    }
+    else
+    {
+        manualInject.BaseRelocation = NULL;
+    }
+    
+    if (ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress)
+    {
+        manualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageBase + 
+            ntHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    }
+    else
+    {
+        manualInject.ImportDirectory = NULL;
+    }
+    
     manualInject.fnLoadLibraryA = (pLoadLibraryA)remoteLoadLibraryA;
     manualInject.fnGetProcAddress = (pGetProcAddress)remoteGetProcAddress;
 
