@@ -2132,6 +2132,7 @@ NTSTATUS PhLoadDllProcess(
     PIMAGE_DOS_HEADER dosHeader;
     PIMAGE_NT_HEADERS ntHeaders;
     MANUAL_INJECT manualInject;
+    PPH_STRING ntFileName = NULL;
 
     UNREFERENCED_PARAMETER(LoadDllUsingApcThread);
 
@@ -2140,9 +2141,16 @@ NTSTATUS PhLoadDllProcess(
         return STATUS_ACCESS_DENIED;
     }
 
+    ntFileName = PhDosPathNameToNtPathName(FileName);
+    if (!ntFileName)
+    {
+        status = STATUS_OBJECT_PATH_NOT_FOUND;
+        goto CleanupExit;
+    }
+
     status = PhCreateFile(
         &fileHandle,
-        FileName,
+        &ntFileName->sr,
         FILE_GENERIC_READ,
         FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ,
@@ -2297,6 +2305,9 @@ CleanupExit:
 
     if (fileHandle)
         NtClose(fileHandle);
+
+    if (ntFileName)
+        PhDereferenceObject(ntFileName);
 
     return status;
 }
