@@ -393,6 +393,9 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     // Write LoadDll function
     PVOID functionAddress = (PVOID)((PMANUAL_INJECT)mem1 + 1);
     AmalgamLog("Writing LoadDll function to address: 0x%p (size: %llu bytes)", functionAddress, loadDllSize);
+    AmalgamLog("Loader memory layout: Structure at 0x%p, Function at 0x%p", mem1, functionAddress);
+    AmalgamLog("Structure size: %zu, Function starts at offset: %zu", sizeof(MANUAL_INJECT), sizeof(MANUAL_INJECT));
+    
     if (!WriteProcessMemory(hProcess, functionAddress, LoadDll, (SIZE_T)loadDllSize, NULL))
     {
         DWORD error = GetLastError();
@@ -407,6 +410,7 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
 
     // Create remote thread
     AmalgamLog("Creating remote thread to execute LoadDll function...");
+    AmalgamLog("CreateRemoteThread parameters: Function=0x%p, Parameter=0x%p", functionAddress, mem1);
     hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)functionAddress, mem1, 0, NULL);
     if (!hThread)
     {
