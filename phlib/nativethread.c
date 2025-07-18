@@ -1981,7 +1981,6 @@ DWORD WINAPI ManualMapShellcode(PVOID p)
 {
     PMANUAL_INJECT ManualInject;
 
-    HMODULE hModule;
     DWORD64 i, Function, count, delta;
     
     DWORD64* ptr;
