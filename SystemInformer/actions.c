@@ -3349,7 +3349,7 @@ BOOLEAN PhUiLoadDllProcess(
         PhDereferenceObject(processFileName);
         PhDereferenceObject(processDirectory);
         PhDereferenceObject(searchPattern);
-        PhpShowErrorProcess(WindowHandle, L"find DLL files in the directory for", Process, STATUS_NOT_FOUND, 0);
+        PhpShowErrorProcess(WindowHandle, L"find DLL files in SystemInformer directory for loading into", Process, STATUS_NOT_FOUND, 0);
         return FALSE;
     }
     
