@@ -1,5 +1,8 @@
 #include <amalgamcore.h>
 
+// Forward declare RtlAdjustPrivilege for debug privileges
+extern "C" NTSTATUS NTAPI RtlAdjustPrivilege(ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled);
+
 // Position-independent shellcode function
 DWORD WINAPI LoadDll(PVOID p)
 {
@@ -175,36 +178,63 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     PIMAGE_DOS_HEADER pIDH;
     PIMAGE_NT_HEADERS pINH;
     MANUAL_INJECT ManualInject;
+    BOOLEAN bl;
+
+    AmalgamLog("Manual mapping injection initialized for PID %d", processId);
+    AmalgamLog("DLL path: %ws", dllPath);
+
+    // Enable debug privileges (critical for accessing protected processes)
+    NTSTATUS status = RtlAdjustPrivilege(20, TRUE, FALSE, &bl);
+    if (status != 0) {
+        AmalgamLog("Warning: Failed to enable debug privileges (status: 0x%X)", status);
+    } else {
+        AmalgamLog("Debug privileges enabled successfully");
+    }
 
     // Open process
+    AmalgamLog("Opening process with PID %d", processId);
     hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
-    if (!hProcess)
+    if (!hProcess) {
+        DWORD error = GetLastError();
+        AmalgamLog("Failed to open target process (error: %d)", error);
         return -1;
+    }
+    AmalgamLog("Process opened successfully");
 
     // Validate target process is 64-bit
     BOOL isWow64 = FALSE;
     if (!IsWow64Process(hProcess, &isWow64)) {
+        DWORD error = GetLastError();
+        AmalgamLog("Error checking target architecture (error: %d)", error);
         CloseHandle(hProcess);
         return -1;
     }
     if (isWow64) {
-        // Target is 32-bit but we're 64-bit loader
+        AmalgamLog("Target process is 32-bit, but this loader is strictly 64-bit only");
         CloseHandle(hProcess);
         return -1;
     }
+    AmalgamLog("Target process architecture validated (64-bit)");
 
     // Load DLL file
+    AmalgamLog("Loading DLL file into memory");
     hFile = CreateFile(dllPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Unable to open the DLL (error: %d)", error);
         CloseHandle(hProcess);
         return -1;
     }
 
     FileSize = GetFileSize(hFile, NULL);
+    AmalgamLog("DLL file size: %d bytes", FileSize);
+    
     buffer = VirtualAlloc(NULL, FileSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!buffer)
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Unable to allocate memory for DLL data (error: %d)", error);
         CloseHandle(hFile);
         CloseHandle(hProcess);
         return -1;
@@ -212,17 +242,22 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
 
     if (!ReadFile(hFile, buffer, FileSize, &read, NULL))
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Unable to read the DLL (error: %d)", error);
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hFile);
         CloseHandle(hProcess);
         return -1;
     }
     CloseHandle(hFile);
+    AmalgamLog("DLL loaded successfully into buffer");
 
     // PE validation
+    AmalgamLog("Validating PE structure");
     pIDH = (PIMAGE_DOS_HEADER)buffer;
     if (pIDH->e_magic != IMAGE_DOS_SIGNATURE)
     {
+        AmalgamLog("Invalid executable image (DOS signature)");
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
@@ -231,6 +266,7 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     pINH = (PIMAGE_NT_HEADERS)((LPBYTE)buffer + pIDH->e_lfanew);
     if (pINH->Signature != IMAGE_NT_SIGNATURE)
     {
+        AmalgamLog("Invalid PE header (NT signature)");
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
@@ -238,6 +274,7 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
 
     if (!(pINH->FileHeader.Characteristics & IMAGE_FILE_DLL))
     {
+        AmalgamLog("The image is not a DLL");
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
@@ -245,19 +282,25 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
 
     if (pINH->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
     {
+        AmalgamLog("Invalid DLL architecture: Expected x64, got 0x%x", pINH->FileHeader.Machine);
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
     }
+    AmalgamLog("PE validation successful");
 
     // Allocate memory in target process
+    AmalgamLog("Allocating memory in target process (size: %d bytes)", pINH->OptionalHeader.SizeOfImage);
     image = VirtualAllocEx(hProcess, NULL, pINH->OptionalHeader.SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!image)
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Unable to allocate memory for the DLL (error: %d)", error);
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
     }
+    AmalgamLog("Memory allocated at address: 0x%p", image);
 
     // Copy PE header
     if (!WriteProcessMemory(hProcess, image, buffer, 0x1000, NULL))
@@ -282,23 +325,40 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         pSectionHeader++;
     }
 
-    // Calculate loader size
-    DWORD64 loadDllSize = (DWORD64)LoadDllEnd - (DWORD64)LoadDll;
-    if (loadDllSize <= 0 || loadDllSize > 0x10000)
+    // Calculate loader size with enhanced safety checks
+    DWORD64 loadDllAddr = (DWORD64)LoadDll;
+    DWORD64 loadDllEndAddr = (DWORD64)LoadDllEnd;
+    DWORD64 loadDllSize;
+    
+    if (loadDllEndAddr > loadDllAddr) {
+        loadDllSize = loadDllEndAddr - loadDllAddr;
+    } else {
         loadDllSize = 2048;
+        AmalgamLog("Warning: LoadDll function size calculation failed, using fallback size: %llu", loadDllSize);
+    }
+    
+    if (loadDllSize > 0x10000) {
+        loadDllSize = 2048;
+        AmalgamLog("Warning: LoadDll function size too large, using fallback size: %llu", loadDllSize);
+    }
     
     DWORD totalLoaderSize = (DWORD)(sizeof(MANUAL_INJECT) + loadDllSize + 512);
+    AmalgamLog("Allocating loader code memory (size: %d bytes)", totalLoaderSize);
     
     mem1 = VirtualAllocEx(hProcess, NULL, totalLoaderSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!mem1)
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Unable to allocate memory for the loader code (error: %d)", error);
         VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
     }
+    AmalgamLog("Loader code allocated at 0x%p", mem1);
 
     // Setup ManualInject structure
+    AmalgamLog("Setting up ManualInject structure");
     memset(&ManualInject, 0, sizeof(MANUAL_INJECT));
     ManualInject.ImageBase = image;
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
@@ -306,10 +366,13 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
     ManualInject.fnLoadLibraryA = LoadLibraryA;
     ManualInject.fnGetProcAddress = GetProcAddress;
+    AmalgamLog("Manual inject structure initialized - ImageBase: 0x%p", image);
 
     // Write ManualInject structure
     if (!WriteProcessMemory(hProcess, mem1, &ManualInject, sizeof(MANUAL_INJECT), NULL))
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Memory write error for structure (error: %d)", error);
         VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
         VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
         VirtualFree(buffer, 0, MEM_RELEASE);
@@ -319,30 +382,40 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
 
     // Write LoadDll function
     PVOID functionAddress = (PVOID)((PMANUAL_INJECT)mem1 + 1);
+    AmalgamLog("Writing LoadDll function to address: 0x%p (size: %llu bytes)", functionAddress, loadDllSize);
     if (!WriteProcessMemory(hProcess, functionAddress, LoadDll, (SIZE_T)loadDllSize, NULL))
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Memory write error for function (error: %d)", error);
         VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
         VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
     }
+    AmalgamLog("LoadDll function written successfully");
 
     // Create remote thread
+    AmalgamLog("Creating remote thread to execute LoadDll function...");
     hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)functionAddress, mem1, 0, NULL);
     if (!hThread)
     {
+        DWORD error = GetLastError();
+        AmalgamLog("Unable to create remote thread (error: %d)", error);
         VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
         VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
         VirtualFree(buffer, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return -1;
     }
+    AmalgamLog("Remote thread created successfully");
 
     // Wait for completion with proper error handling
+    AmalgamLog("Waiting for remote thread to complete...");
     DWORD waitResult = WaitForSingleObject(hThread, 10000);
     
     if (waitResult == WAIT_TIMEOUT) {
+        AmalgamLog("Remote thread timed out after 10 seconds");
         TerminateThread(hThread, 0);
         CloseHandle(hThread);
         VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
@@ -352,6 +425,8 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         return -1;
     }
     else if (waitResult == WAIT_FAILED) {
+        DWORD error = GetLastError();
+        AmalgamLog("Wait for remote thread failed (error: %d)", error);
         CloseHandle(hThread);
         VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
         VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
@@ -363,16 +438,13 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     // Check thread exit code and injection status
     DWORD threadExitCode;
     GetExitCodeThread(hThread, &threadExitCode);
+    AmalgamLog("Remote thread completed with exit code: %d", threadExitCode);
     
     // Read back the status from the injected structure
     MANUAL_INJECT statusCheck;
     if (ReadProcessMemory(hProcess, mem1, &statusCheck, sizeof(statusCheck), NULL)) {
-        if (statusCheck.hMod == (HINSTANCE)0x404 ||
-            statusCheck.hMod == (HINSTANCE)0x405 ||
-            statusCheck.hMod == (HINSTANCE)0x406 ||
-            statusCheck.hMod == (HINSTANCE)0x407 ||
-            statusCheck.hMod == (HINSTANCE)0x408) {
-            // Injection failed
+        if (statusCheck.hMod == (HINSTANCE)0x404) {
+            AmalgamLog("LoadDll function failed - module loading failed");
             CloseHandle(hThread);
             VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
             VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
@@ -380,11 +452,54 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
             CloseHandle(hProcess);
             return -1;
         }
+        else if (statusCheck.hMod == (HINSTANCE)0x405) {
+            AmalgamLog("LoadDll function failed - ordinal import failed");
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x406) {
+            AmalgamLog("LoadDll function failed - name import failed");
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x407) {
+            AmalgamLog("LoadDll function failed - DLL entry point returned FALSE");
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x408) {
+            AmalgamLog("LoadDll function failed - DLL entry point crashed");
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+        else if (statusCheck.hMod == statusCheck.ImageBase) {
+            AmalgamLog("LoadDll function completed successfully");
+        }
+        else {
+            AmalgamLog("LoadDll function status unknown (hMod: 0x%p)", statusCheck.hMod);
+        }
     }
     
     CloseHandle(hThread);
     
     // Give DLL time to initialize before cleanup
+    AmalgamLog("Giving DLL time to initialize (2 second delay)");
     Sleep(2000);
 
     // Only cleanup loader memory, keep DLL image
@@ -392,5 +507,6 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     VirtualFree(buffer, 0, MEM_RELEASE);
     CloseHandle(hProcess);
 
+    AmalgamLog("Manual mapping injection completed successfully");
     return 0;
 }
