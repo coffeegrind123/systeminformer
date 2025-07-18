@@ -2407,8 +2407,8 @@ NTSTATUS PhLoadDllProcess(
         return STATUS_UNSUCCESSFUL;
     }
 
-    // Write LoadDll function (AmalgamLoader style)
-    PVOID functionAddress = (PVOID)((PMANUAL_INJECT)mem1 + 1);
+    // Write LoadDll function (AmalgamLoader style) - Fix pointer arithmetic
+    PVOID functionAddress = (PVOID)((LPBYTE)mem1 + sizeof(MANUAL_INJECT));
     if (!WriteProcessMemory(ProcessHandle, functionAddress, LoadDll, (SIZE_T)loadDllSize, NULL))
     {
         VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
