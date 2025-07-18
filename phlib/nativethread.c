@@ -2340,8 +2340,27 @@ NTSTATUS PhLoadDllProcess(
     memset(&ManualInject, 0, sizeof(MANUAL_INJECT));
     ManualInject.ImageBase = image;
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
-    ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-    ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    
+    // Handle relocation directory (may not exist)
+    if (pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size > 0)
+    {
+        ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+    }
+    else
+    {
+        ManualInject.BaseRelocation = NULL;
+    }
+    
+    // Handle import directory (may not exist)
+    if (pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size > 0)
+    {
+        ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    }
+    else
+    {
+        ManualInject.ImportDirectory = NULL;
+    }
+    
     // Use AmalgamLoader's exact approach for function pointers
     ManualInject.fnLoadLibraryA = LoadLibraryA;
     ManualInject.fnGetProcAddress = GetProcAddress;
