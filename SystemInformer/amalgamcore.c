@@ -27,10 +27,13 @@ DWORD WINAPI LoadDll(PVOID p)
 
     // Handle relocations
     pIBR = ManualInject->BaseRelocation;
+    ManualInject->hMod = (HINSTANCE)0x1235; // Before delta calculation
     delta = (DWORD64)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
+    ManualInject->hMod = (HINSTANCE)0x1236; // After delta calculation
 
     if (pIBR && delta != 0)
     {
+        ManualInject->hMod = (HINSTANCE)0x1237; // Starting relocations
         while (pIBR->VirtualAddress)
         {
             if (pIBR->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
@@ -57,6 +60,8 @@ DWORD WINAPI LoadDll(PVOID p)
         }
     }
 
+    ManualInject->hMod = (HINSTANCE)0x1238; // Relocations complete
+    
     // Handle imports
     pIID = ManualInject->ImportDirectory;
 
@@ -503,7 +508,19 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
             return -1;
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1234) {
-            AmalgamLog("LoadDll function entered successfully but crashed during execution");
+            AmalgamLog("LoadDll function entered but crashed before delta calculation");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1235) {
+            AmalgamLog("LoadDll function crashed during delta calculation");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1236) {
+            AmalgamLog("LoadDll function crashed after delta calculation, before relocations");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1237) {
+            AmalgamLog("LoadDll function crashed during relocation processing");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1238) {
+            AmalgamLog("LoadDll function crashed after relocations, during imports");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
