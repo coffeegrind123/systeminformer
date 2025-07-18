@@ -190,12 +190,12 @@ INT WINAPI wWinMain(
         if (wcscmp(exeName, L"SystemInformer.exe") != 0)
         {
             // Auto-injector mode: Apply stealth flags
-            PhStartupParameters.PhEnableSettings = FALSE;
-            PhStartupParameters.PhEnablePlugins = FALSE;
-            PhStartupParameters.PhEnableNewInstance = TRUE;
-            PhStartupParameters.PhEnableStartHidden = TRUE;
-            PhStartupParameters.PhEnableShowDialogs = FALSE;
-            PhStartupParameters.PhEnableKphNeeded = FALSE;
+            PhStartupParameters.NoSettings = TRUE;
+            PhStartupParameters.NoPlugins = TRUE;
+            PhStartupParameters.NewInstance = TRUE;
+            PhStartupParameters.ShowHidden = TRUE;
+            PhStartupParameters.Silent = TRUE;
+            PhStartupParameters.NoKph = TRUE;
             
             // Check if folder has exactly one DLL and one EXE
             WCHAR* lastSlash = wcsrchr(exePath, L'\\');
