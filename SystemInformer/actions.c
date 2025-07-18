@@ -3326,14 +3326,18 @@ BOOLEAN PhUiLoadDllProcess(
         return FALSE;
     }
     
-    // Get directory from process path
-    processDirectory = PhGetDirectory(processFileName);
-    if (!processDirectory)
+    // Get directory from process path by finding last backslash
+    PWSTR lastBackslash = wcsrchr(processFileName->Buffer, L'\\');
+    if (!lastBackslash)
     {
         PhDereferenceObject(processFileName);
         PhShowError(WindowHandle, L"Unable to get process directory.");
         return FALSE;
     }
+    
+    // Create directory string by copying up to last backslash
+    SIZE_T directoryLength = (SIZE_T)(lastBackslash - processFileName->Buffer);
+    processDirectory = PhCreateStringEx(processFileName->Buffer, directoryLength * sizeof(WCHAR));
     
     // Create search pattern for DLL files
     searchPattern = PhConcatStrings(3, processDirectory->Buffer, L"\\", L"*.dll");
