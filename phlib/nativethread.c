@@ -2152,66 +2152,7 @@ NTSTATUS PhLoadDllProcess(
     VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
     VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
     VirtualFree(buffer, 0, MEM_RELEASE);
-    return STATUS_NOT_IMPLEMENTED; // This function is deprecated
-
-    // Create remote thread (AmalgamLoader style)
-    hThread = CreateRemoteThread(ProcessHandle, NULL, 0, (LPTHREAD_START_ROUTINE)functionAddress, mem1, 0, NULL);
-    if (!hThread)
-    {
-        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
-        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
-        VirtualFree(buffer, 0, MEM_RELEASE);
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    // Wait for completion with error checking
-    DWORD waitResult = WaitForSingleObject(hThread, Timeout ? Timeout : 10000);
-    
-    // Check thread exit code for debugging
-    DWORD threadExitCode = 0;
-    GetExitCodeThread(hThread, &threadExitCode);
-    CloseHandle(hThread);
-    
-    // Read back the status to see what happened
-    MANUAL_INJECT statusCheck;
-    if (ReadProcessMemory(ProcessHandle, mem1, &statusCheck, sizeof(statusCheck), NULL))
-    {
-        // Check for specific error codes from AmalgamLoader
-        if (statusCheck.hMod == (HINSTANCE)0x404)
-        {
-            // Module loading failed - this means the crash happened in LoadLibraryA call
-            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
-            VirtualFree(buffer, 0, MEM_RELEASE);
-            return STATUS_UNSUCCESSFUL; // LoadLibraryA failed
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x405 || statusCheck.hMod == (HINSTANCE)0x406)
-        {
-            // Import resolution failed - crash in GetProcAddress calls
-            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
-            VirtualFree(buffer, 0, MEM_RELEASE);
-            return STATUS_UNSUCCESSFUL; // GetProcAddress failed
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x407)
-        {
-            // DLL main returned FALSE
-            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
-            VirtualFree(buffer, 0, MEM_RELEASE);
-            return STATUS_UNSUCCESSFUL; // DLL main failed
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x408)
-        {
-            // DLL main crashed
-            VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
-            VirtualFree(buffer, 0, MEM_RELEASE);
-            return STATUS_UNSUCCESSFUL; // DLL main crashed
-        }
-    }
-
-    // Cleanup loader memory but keep DLL loaded (AmalgamLoader style)
-    VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
-    VirtualFree(buffer, 0, MEM_RELEASE);
-
-    return (waitResult == WAIT_OBJECT_0) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
+    return STATUS_NOT_IMPLEMENTED; // This function is deprecated - use AmalgamCore instead
 }
 
 
