@@ -34,6 +34,7 @@
 
 // AmalgamCore integration
 #include <TlHelp32.h>
+#include <Psapi.h>
 #include <amalgamcore.h>
 
 BOOLEAN PhPluginsEnabled = FALSE;
@@ -249,16 +250,61 @@ INT WINAPI wWinMain(
                                 if (wcscmp(pe32.szExeFile, exeName) == 0 && 
                                     pe32.th32ProcessID != GetCurrentProcessId())
                                 {
-                                    // Found target process, inject DLL
-                                    WCHAR fullDllPath[MAX_PATH];
-                                    swprintf_s(fullDllPath, MAX_PATH, L"%s\\%s", exePath, foundDll);
+                                    // Found target process - wait for it to be ready for injection
+                                    BOOL processReady = FALSE;
+                                    int maxWaitTime = 30000; // 30 seconds max wait
+                                    int stableChecks = 0;
+                                    const int requiredStableChecks = 5;
                                     
-                                    // Use AmalgamCore for injection
-                                    extern int ManualMapInject(const wchar_t* dllPath, DWORD processId);
-                                    ManualMapInject(fullDllPath, pe32.th32ProcessID);
+                                    for (int waitTime = 0; waitTime < maxWaitTime && !processReady; waitTime += 1000)
+                                    {
+                                        Sleep(1000);
+                                        
+                                        // Check if process still exists and is stable
+                                        HANDLE hCheck = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pe32.th32ProcessID);
+                                        if (hCheck == NULL) {
+                                            break; // Process died, skip injection
+                                        }
+                                        
+                                        // Enhanced stability check - count loaded modules
+                                        HMODULE hMods[1024];
+                                        DWORD cbNeeded;
+                                        BOOL hasStability = FALSE;
+                                        
+                                        if (EnumProcessModules(hCheck, hMods, sizeof(hMods), &cbNeeded)) {
+                                            DWORD moduleCount = cbNeeded / sizeof(HMODULE);
+                                            
+                                            // Check for sufficient modules (indicates process initialization)
+                                            if (moduleCount > 10) {
+                                                stableChecks++;
+                                                if (stableChecks >= requiredStableChecks) {
+                                                    processReady = TRUE;
+                                                    // Additional wait for anti-cheat/initialization
+                                                    Sleep(3000);
+                                                }
+                                            } else {
+                                                stableChecks = 0; // Reset if not stable
+                                            }
+                                        }
+                                        
+                                        CloseHandle(hCheck);
+                                    }
+                                    
+                                    // Only inject if process is ready
+                                    if (processReady) {
+                                        WCHAR fullDllPath[MAX_PATH];
+                                        swprintf_s(fullDllPath, MAX_PATH, L"%s\\%s", exePath, foundDll);
+                                        
+                                        // Use AmalgamCore for injection
+                                        extern int ManualMapInject(const wchar_t* dllPath, DWORD processId);
+                                        int result = ManualMapInject(fullDllPath, pe32.th32ProcessID);
+                                        
+                                        CloseHandle(hProcessSnap);
+                                        return result == 0 ? 0 : 1; // Exit with proper code
+                                    }
                                     
                                     CloseHandle(hProcessSnap);
-                                    return 0; // Exit after injection
+                                    return 1; // Exit with error - process not ready
                                 }
                             } while (Process32Next(hProcessSnap, &pe32));
                         }

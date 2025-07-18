@@ -181,6 +181,18 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     if (!hProcess)
         return -1;
 
+    // Validate target process is 64-bit
+    BOOL isWow64 = FALSE;
+    if (!IsWow64Process(hProcess, &isWow64)) {
+        CloseHandle(hProcess);
+        return -1;
+    }
+    if (isWow64) {
+        // Target is 32-bit but we're 64-bit loader
+        CloseHandle(hProcess);
+        return -1;
+    }
+
     // Load DLL file
     hFile = CreateFile(dllPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
@@ -327,11 +339,55 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         return -1;
     }
 
-    // Wait for completion
-    WaitForSingleObject(hThread, 10000);
+    // Wait for completion with proper error handling
+    DWORD waitResult = WaitForSingleObject(hThread, 10000);
+    
+    if (waitResult == WAIT_TIMEOUT) {
+        TerminateThread(hThread, 0);
+        CloseHandle(hThread);
+        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return -1;
+    }
+    else if (waitResult == WAIT_FAILED) {
+        CloseHandle(hThread);
+        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return -1;
+    }
+    
+    // Check thread exit code and injection status
+    DWORD threadExitCode;
+    GetExitCodeThread(hThread, &threadExitCode);
+    
+    // Read back the status from the injected structure
+    MANUAL_INJECT statusCheck;
+    if (ReadProcessMemory(hProcess, mem1, &statusCheck, sizeof(statusCheck), NULL)) {
+        if (statusCheck.hMod == (HINSTANCE)0x404 ||
+            statusCheck.hMod == (HINSTANCE)0x405 ||
+            statusCheck.hMod == (HINSTANCE)0x406 ||
+            statusCheck.hMod == (HINSTANCE)0x407 ||
+            statusCheck.hMod == (HINSTANCE)0x408) {
+            // Injection failed
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+    }
+    
     CloseHandle(hThread);
+    
+    // Give DLL time to initialize before cleanup
+    Sleep(2000);
 
-    // Cleanup
+    // Only cleanup loader memory, keep DLL image
     VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
     VirtualFree(buffer, 0, MEM_RELEASE);
     CloseHandle(hProcess);
