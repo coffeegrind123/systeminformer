@@ -3305,29 +3305,59 @@ BOOLEAN PhUiLoadDllProcess(
     _In_ PPH_PROCESS_ITEM Process
     )
 {
-    static PH_FILETYPE_FILTER filters[] =
-    {
-        { L"DLL files (*.dll)", L"*.dll" },
-        { L"All files (*.*)", L"*.*" }
-    };
-
     NTSTATUS status = STATUS_UNSUCCESSFUL;
     HANDLE processHandle = NULL;
-    PVOID fileDialog;
     PPH_STRING fileName;
 
-    fileDialog = PhCreateOpenFileDialog();
-    PhSetFileDialogOptions(fileDialog, PH_FILEDIALOG_DONTADDTORECENT);
-    PhSetFileDialogFilter(fileDialog, filters, RTL_NUMBER_OF(filters));
-
-    if (!PhShowFileDialog(WindowHandle, fileDialog))
+    // Automatically find first DLL in target process directory
+    PPH_STRING processFileName = NULL;
+    PPH_STRING processDirectory = NULL;
+    PPH_STRING searchPattern = NULL;
+    PPH_STRING foundDllPath = NULL;
+    HANDLE findHandle = INVALID_HANDLE_VALUE;
+    WIN32_FIND_DATA findData;
+    
+    // Get SystemInformer's own executable path
+    processFileName = PhGetApplicationFileName();
+    
+    if (!processFileName)
     {
-        PhFreeFileDialog(fileDialog);
+        PhShowError(WindowHandle, L"Unable to get process executable path.");
         return FALSE;
     }
-
-    fileName = PH_AUTO(PhGetFileDialogFileName(fileDialog));
-    PhFreeFileDialog(fileDialog);
+    
+    // Get directory from process path
+    processDirectory = PhGetDirectory(processFileName);
+    if (!processDirectory)
+    {
+        PhDereferenceObject(processFileName);
+        PhShowError(WindowHandle, L"Unable to get process directory.");
+        return FALSE;
+    }
+    
+    // Create search pattern for DLL files
+    searchPattern = PhConcatStrings(3, processDirectory->Buffer, L"\\", L"*.dll");
+    
+    // Find first DLL file in the directory
+    findHandle = FindFirstFile(searchPattern->Buffer, &findData);
+    if (findHandle == INVALID_HANDLE_VALUE)
+    {
+        PhDereferenceObject(processFileName);
+        PhDereferenceObject(processDirectory);
+        PhDereferenceObject(searchPattern);
+        PhShowError(WindowHandle, L"No DLL files found in the target process directory.");
+        return FALSE;
+    }
+    
+    // Build full path to found DLL
+    foundDllPath = PhConcatStrings(3, processDirectory->Buffer, L"\\", findData.cFileName);
+    fileName = PH_AUTO(foundDllPath);
+    
+    // Clean up
+    FindClose(findHandle);
+    PhDereferenceObject(processFileName);
+    PhDereferenceObject(processDirectory);
+    PhDereferenceObject(searchPattern);
 
     // Windows 8 requires ALL_ACCESS for PLM execution requests. (dmex)
     if (WindowsVersion >= WINDOWS_8 && WindowsVersion <= WINDOWS_8_1)
