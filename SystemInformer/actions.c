@@ -3342,19 +3342,18 @@ BOOLEAN PhUiLoadDllProcess(
     // Create search pattern for DLL files
     searchPattern = PhConcatStrings(3, processDirectory->Buffer, L"\\", L"*.dll");
     
-    // Debug: Show the search path
-    WCHAR debugMessage[512];
-    swprintf_s(debugMessage, 512, L"Searching for DLL files in: %s", searchPattern->Buffer);
-    MessageBox(WindowHandle, debugMessage, L"Debug - DLL Search Path", MB_OK);
-    
     // Find first DLL file in the directory
     findHandle = FindFirstFile(searchPattern->Buffer, &findData);
     if (findHandle == INVALID_HANDLE_VALUE)
     {
+        // Show debug information in the error message
+        PPH_STRING errorMessage = PhFormatString(L"find DLL files in SystemInformer directory for loading into (searched: %s)", searchPattern->Buffer);
+        PhpShowErrorProcess(WindowHandle, errorMessage->Buffer, Process, STATUS_NOT_FOUND, 0);
+        PhDereferenceObject(errorMessage);
+        
         PhDereferenceObject(processFileName);
         PhDereferenceObject(processDirectory);
         PhDereferenceObject(searchPattern);
-        PhpShowErrorProcess(WindowHandle, L"find DLL files in SystemInformer directory for loading into", Process, STATUS_NOT_FOUND, 0);
         return FALSE;
     }
     
