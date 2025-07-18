@@ -2294,33 +2294,6 @@ NTSTATUS PhLoadDllProcess(
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
-    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
-    PVOID remoteLoadLibraryA = NULL;
-    PVOID remoteGetProcAddress = NULL;
-
-    status = PhGetProcessRuntimeLibrary(ProcessHandle, &runtimeLibrary, NULL);
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    status = PhGetProcedureAddressRemote(
-        ProcessHandle,
-        &runtimeLibrary->Kernel32FileName,
-        "LoadLibraryA",
-        &remoteLoadLibraryA,
-        NULL
-        );
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
-
-    status = PhGetProcedureAddressRemote(
-        ProcessHandle,
-        &runtimeLibrary->Kernel32FileName,
-        "GetProcAddress", 
-        &remoteGetProcAddress,
-        NULL
-        );
-    if (!NT_SUCCESS(status))
-        goto CleanupExit;
 
     RtlZeroMemory(&manualInject, sizeof(manualInject));
     manualInject.ImageBase = imageBase;
@@ -2346,8 +2319,8 @@ NTSTATUS PhLoadDllProcess(
         manualInject.ImportDirectory = NULL;
     }
     
-    manualInject.fnLoadLibraryA = (pLoadLibraryA)remoteLoadLibraryA;
-    manualInject.fnGetProcAddress = (pGetProcAddress)remoteGetProcAddress;
+    manualInject.fnLoadLibraryA = LoadLibraryA;
+    manualInject.fnGetProcAddress = GetProcAddress;
 
     status = NtWriteVirtualMemory(ProcessHandle, loaderMemory, &manualInject, sizeof(manualInject), NULL);
     if (!NT_SUCCESS(status))
