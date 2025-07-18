@@ -2342,18 +2342,52 @@ NTSTATUS PhLoadDllProcess(
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
     ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
     ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    // Get function addresses in target process context (fix for cross-process issue)
-    HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
-    if (!kernel32)
+    // Get function addresses in target process context using SystemInformer's robust method
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
+    NTSTATUS status = PhGetProcessRuntimeLibrary(ProcessHandle, &runtimeLibrary, NULL);
+    if (!NT_SUCCESS(status))
     {
         VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
         VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
         VirtualFree(buffer, 0, MEM_RELEASE);
-        return STATUS_UNSUCCESSFUL;
+        return status;
     }
     
-    ManualInject.fnLoadLibraryA = (pLoadLibraryA)GetProcAddress(kernel32, "LoadLibraryA");
-    ManualInject.fnGetProcAddress = (pGetProcAddress)GetProcAddress(kernel32, "GetProcAddress");
+    PVOID loadLibraryAddress = NULL;
+    PVOID getProcAddressAddress = NULL;
+    
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        &runtimeLibrary->Kernel32FileName,
+        "LoadLibraryA",
+        &loadLibraryAddress,
+        NULL
+    );
+    if (!NT_SUCCESS(status))
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return status;
+    }
+    
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        &runtimeLibrary->Kernel32FileName,
+        "GetProcAddress",
+        &getProcAddressAddress,
+        NULL
+    );
+    if (!NT_SUCCESS(status))
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return status;
+    }
+    
+    ManualInject.fnLoadLibraryA = (pLoadLibraryA)loadLibraryAddress;
+    ManualInject.fnGetProcAddress = (pGetProcAddress)getProcAddressAddress;
 
     // Write ManualInject structure (AmalgamLoader style)
     if (!WriteProcessMemory(ProcessHandle, mem1, &ManualInject, sizeof(MANUAL_INJECT), NULL))
