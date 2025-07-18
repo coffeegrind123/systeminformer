@@ -22,6 +22,12 @@ DWORD WINAPI LoadDll(PVOID p)
         return FALSE;
     }
 
+    // Validate critical pointers before use
+    if (!ManualInject->ImageBase || !ManualInject->NtHeaders) {
+        if (ManualInject) ManualInject->hMod = (HINSTANCE)0x409; // Invalid pointers
+        return FALSE;
+    }
+
     // Handle relocations
     pIBR = ManualInject->BaseRelocation;
     delta = (DWORD64)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
@@ -187,6 +193,7 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     NTSTATUS status = RtlAdjustPrivilege(20, TRUE, FALSE, &bl);
     if (status != 0) {
         AmalgamLog("Warning: Failed to enable debug privileges (status: 0x%X)", status);
+        AmalgamLog("Continuing anyway - may affect protected process access");
     } else {
         AmalgamLog("Debug privileges enabled successfully");
     }
@@ -362,11 +369,33 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     memset(&ManualInject, 0, sizeof(MANUAL_INJECT));
     ManualInject.ImageBase = image;
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
-    ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-    ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    
+    // Validate and setup BaseRelocation
+    if (pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress != 0) {
+        ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+        AmalgamLog("Base relocation table found at RVA: 0x%X", pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+    } else {
+        ManualInject.BaseRelocation = NULL;
+        AmalgamLog("No base relocation table found");
+    }
+    
+    // Validate and setup ImportDirectory
+    if (pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress != 0) {
+        ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+        AmalgamLog("Import directory found at RVA: 0x%X", pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    } else {
+        ManualInject.ImportDirectory = NULL;
+        AmalgamLog("No import directory found");
+    }
+    
     ManualInject.fnLoadLibraryA = LoadLibraryA;
     ManualInject.fnGetProcAddress = GetProcAddress;
     AmalgamLog("Manual inject structure initialized - ImageBase: 0x%p", image);
+    AmalgamLog("NtHeaders: 0x%p, BaseRelocation: 0x%p, ImportDirectory: 0x%p", 
+               ManualInject.NtHeaders, ManualInject.BaseRelocation, ManualInject.ImportDirectory);
+    AmalgamLog("LoadLibraryA: 0x%p, GetProcAddress: 0x%p", LoadLibraryA, GetProcAddress);
+    AmalgamLog("Original ImageBase from PE: 0x%llX, Target ImageBase: 0x%p", 
+               pINH->OptionalHeader.ImageBase, image);
 
     // Write ManualInject structure
     if (!WriteProcessMemory(hProcess, mem1, &ManualInject, sizeof(MANUAL_INJECT), NULL))
@@ -481,6 +510,15 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x408) {
             AmalgamLog("LoadDll function failed - DLL entry point crashed");
+            CloseHandle(hThread);
+            VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+            VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+            VirtualFree(buffer, 0, MEM_RELEASE);
+            CloseHandle(hProcess);
+            return -1;
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x409) {
+            AmalgamLog("LoadDll function failed - invalid structure pointers");
             CloseHandle(hThread);
             VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
             VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
