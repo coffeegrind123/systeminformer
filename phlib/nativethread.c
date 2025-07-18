@@ -2342,8 +2342,18 @@ NTSTATUS PhLoadDllProcess(
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
     ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
     ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    ManualInject.fnLoadLibraryA = LoadLibraryA;
-    ManualInject.fnGetProcAddress = GetProcAddress;
+    // Get function addresses in target process context (fix for cross-process issue)
+    HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+    if (!kernel32)
+    {
+        VirtualFreeEx(ProcessHandle, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(ProcessHandle, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return STATUS_UNSUCCESSFUL;
+    }
+    
+    ManualInject.fnLoadLibraryA = (pLoadLibraryA)GetProcAddress(kernel32, "LoadLibraryA");
+    ManualInject.fnGetProcAddress = (pGetProcAddress)GetProcAddress(kernel32, "GetProcAddress");
 
     // Write ManualInject structure (AmalgamLoader style)
     if (!WriteProcessMemory(ProcessHandle, mem1, &ManualInject, sizeof(MANUAL_INJECT), NULL))
