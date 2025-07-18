@@ -2319,8 +2319,37 @@ NTSTATUS PhLoadDllProcess(
         manualInject.ImportDirectory = NULL;
     }
     
-    manualInject.fnLoadLibraryA = LoadLibraryA;
-    manualInject.fnGetProcAddress = GetProcAddress;
+    // Get function addresses in target process context
+    PPH_PROCESS_RUNTIME_LIBRARY runtimeLibrary;
+    status = PhGetProcessRuntimeLibrary(ProcessHandle, &runtimeLibrary, NULL);
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+        
+    PVOID loadLibraryAddress = NULL;
+    PVOID getProcAddressAddress = NULL;
+    
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        &runtimeLibrary->Kernel32FileName,
+        "LoadLibraryA",
+        &loadLibraryAddress,
+        NULL
+    );
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+        
+    status = PhGetProcedureAddressRemote(
+        ProcessHandle,
+        &runtimeLibrary->Kernel32FileName,
+        "GetProcAddress", 
+        &getProcAddressAddress,
+        NULL
+    );
+    if (!NT_SUCCESS(status))
+        goto CleanupExit;
+    
+    manualInject.fnLoadLibraryA = (pLoadLibraryA)loadLibraryAddress;
+    manualInject.fnGetProcAddress = (pGetProcAddress)getProcAddressAddress;
 
     status = NtWriteVirtualMemory(ProcessHandle, loaderMemory, &manualInject, sizeof(manualInject), NULL);
     if (!NT_SUCCESS(status))
