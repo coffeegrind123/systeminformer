@@ -2328,7 +2328,7 @@ NTSTATUS PhLoadDllProcess(
         sectionHeader++;
     }
 
-    SIZE_T shellcodeSize = (SIZE_T)((LPBYTE)ManualMapShellcodeEnd - (LPBYTE)ManualMapShellcode);
+    SIZE_T shellcodeSize = (SIZE_T)((LPBYTE)LoadDllEnd - (LPBYTE)LoadDll);
     if (shellcodeSize == 0 || shellcodeSize > 0x10000)
         shellcodeSize = 4096;
 
@@ -2364,7 +2364,7 @@ NTSTATUS PhLoadDllProcess(
         goto CleanupExit;
 
     PVOID shellcodeAddress = (PVOID)((PMANUAL_INJECT)loaderMemory + 1);
-    status = NtWriteVirtualMemory(ProcessHandle, shellcodeAddress, ManualMapShellcode, shellcodeSize, NULL);
+    status = NtWriteVirtualMemory(ProcessHandle, shellcodeAddress, LoadDll, shellcodeSize, NULL);
     if (!NT_SUCCESS(status))
         goto CleanupExit;
 
