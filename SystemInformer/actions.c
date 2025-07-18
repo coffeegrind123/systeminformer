@@ -3322,7 +3322,7 @@ BOOLEAN PhUiLoadDllProcess(
     
     if (!processFileName)
     {
-        PhShowError(WindowHandle, L"Unable to get process executable path.");
+        PhpShowErrorProcess(WindowHandle, L"get the application path for", Process, STATUS_UNSUCCESSFUL, 0);
         return FALSE;
     }
     
@@ -3331,7 +3331,7 @@ BOOLEAN PhUiLoadDllProcess(
     if (!lastBackslash)
     {
         PhDereferenceObject(processFileName);
-        PhShowError(WindowHandle, L"Unable to get process directory.");
+        PhpShowErrorProcess(WindowHandle, L"get the directory path for", Process, STATUS_UNSUCCESSFUL, 0);
         return FALSE;
     }
     
@@ -3349,7 +3349,7 @@ BOOLEAN PhUiLoadDllProcess(
         PhDereferenceObject(processFileName);
         PhDereferenceObject(processDirectory);
         PhDereferenceObject(searchPattern);
-        PhShowError(WindowHandle, L"No DLL files found in the target process directory.");
+        PhpShowErrorProcess(WindowHandle, L"find DLL files in the directory for", Process, STATUS_NOT_FOUND, 0);
         return FALSE;
     }
     
