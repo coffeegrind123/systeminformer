@@ -179,6 +179,8 @@ DWORD WINAPI LoadDll(PVOID p)
                 return FALSE;
             }
             
+            ManualInject->hMod = (HINSTANCE)0x1245; // About to start DLL resolution
+            
             // Use hardcoded addresses for system DLLs since LoadLibraryA fails in TF2
             // These DLLs are already loaded in the target process at known addresses
             if (importName[0] == 'k' || importName[0] == 'K') { // kernel32.dll
@@ -209,6 +211,8 @@ DWORD WINAPI LoadDll(PVOID p)
                 ManualInject->hMod = (HINSTANCE)0x404;
                 return FALSE;
             }
+            
+            ManualInject->hMod = (HINSTANCE)0x1246; // DLL module resolved, starting function resolution
 
             // Use real function resolution like AmalgamLoader
             // This is critical - DLL will crash if we use dummy addresses
@@ -710,6 +714,12 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1244) {
             AmalgamLog("LoadDll function failed - import directory pointer out of bounds");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1245) {
+            AmalgamLog("LoadDll function crashed during DLL module resolution");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1246) {
+            AmalgamLog("LoadDll function crashed during function resolution");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
