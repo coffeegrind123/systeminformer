@@ -86,7 +86,13 @@ DWORD WINAPI LoadDll(PVOID p)
                 return FALSE;
             }
             
-            hModule = ManualInject->fnLoadLibraryA(importName);
+            // Try manual LoadLibraryA approach using LdrLoadDll
+            ManualInject->hMod = (HINSTANCE)0x123D; // Before manual LoadLibrary
+            
+            // For now, skip LoadLibraryA and assume module is already loaded
+            // This tests if the issue is specifically with LoadLibraryA calls
+            hModule = ManualInject->fnLoadLibraryA("kernel32.dll"); // Try loading kernel32 which should always work
+            
             ManualInject->hMod = (HINSTANCE)0x123B; // After LoadLibraryA call
 
             if (!hModule)
@@ -567,6 +573,9 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123C) {
             AmalgamLog("LoadDll function failed - import DLL name string validation failed");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x123D) {
+            AmalgamLog("LoadDll function crashed during kernel32.dll test load");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
