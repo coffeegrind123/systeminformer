@@ -139,7 +139,9 @@ DWORD WINAPI LoadDll(PVOID p)
                 return FALSE;
             }
             
+            ManualInject->hMod = (HINSTANCE)0x123D; // About to calculate importName pointer
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
+            ManualInject->hMod = (HINSTANCE)0x123E; // importName pointer calculated successfully
             
             // Safely try to access the string using exception handling
             __try {
@@ -665,15 +667,18 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
             AmalgamLog("LoadDll function crashed after LoadLibraryA, during GetProcAddress");
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123C) {
-            AmalgamLog("LoadDll function failed - import DLL name string validation failed");
+            AmalgamLog("LoadDll function failed - invalid import name pointer");
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123D) {
-            AmalgamLog("LoadDll function using manual DLL resolution (LoadLibraryA bypass)");
+            AmalgamLog("LoadDll function crashed while calculating importName pointer");
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123E) {
-            AmalgamLog("LoadDll function using dummy base for unknown DLL import");
+            AmalgamLog("LoadDll function crashed during string validation (after pointer calc)");
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123F) {
+            AmalgamLog("LoadDll function using dummy base for unknown DLL import");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1240) {
             AmalgamLog("LoadDll function using placeholder function resolution (GetProcAddress bypass)");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
