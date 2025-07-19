@@ -86,36 +86,8 @@ DWORD WINAPI LoadDll(PVOID p)
                 return FALSE;
             }
             
-            // LoadLibraryA is broken in remote thread context, skip import resolution
-            // Most essential DLLs (kernel32, ntdll, user32) are already loaded in target process
-            ManualInject->hMod = (HINSTANCE)0x123D; // Skipping broken LoadLibraryA
-            
-            // Use REAL DLL base addresses from target process (tf_win64.exe)
-            // These are the actual loaded addresses, not guessed values
-            if (importName[0] == 'k' || importName[0] == 'K') { // kernel32.dll
-                hModule = (HMODULE)0x7ffee3480000; // Real kernel32 base from target
-            } else if (importName[0] == 'n' || importName[0] == 'N') { // ntdll.dll  
-                hModule = (HMODULE)0x7ffee4db0000; // Real ntdll base from target
-            } else if (importName[0] == 'u' || importName[0] == 'U') { // user32.dll
-                hModule = (HMODULE)0x7ffee32c0000; // Real user32 base from target
-            } else if (importName[0] == 'a' || importName[0] == 'A') { // advapi32.dll
-                hModule = (HMODULE)0x7ffee3030000; // Real advapi32 base from target
-            } else if (importName[0] == 'm' || importName[0] == 'M') { // msvcrt.dll
-                hModule = (HMODULE)0x7ffee3550000; // Real msvcrt base from target
-            } else if (importName[0] == 'g' || importName[0] == 'G') { // gdi32.dll
-                hModule = (HMODULE)0x7ffee4950000; // Real gdi32 base from target
-            } else if (importName[0] == 'o' || importName[0] == 'O') { // ole32.dll, oleaut32.dll
-                hModule = (HMODULE)0x7ffee2c40000; // Real ole32 base from target
-            } else if (importName[0] == 's' || importName[0] == 'S') { // shell32.dll, sechost.dll
-                hModule = (HMODULE)0x7ffee37e0000; // Real shell32 base from target
-            } else {
-                // For other DLLs, provide a reasonable default base
-                hModule = (HMODULE)0x7ffe00000000; // Safe default in DLL space
-                ManualInject->hMod = (HINSTANCE)0x123E; // Using default for other DLL
-            }
-            
-            ManualInject->hMod = (HINSTANCE)0x123B; // After manual module resolution
-
+            // Use LoadLibraryA like AmalgamLoader - this ensures modules are properly loaded
+            hModule = ManualInject->fnLoadLibraryA(importName);
             if (!hModule)
             {
                 ManualInject->hMod = (HINSTANCE)0x404;
