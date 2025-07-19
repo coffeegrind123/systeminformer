@@ -257,12 +257,16 @@ DWORD WINAPI LoadDll(PVOID p)
     // Many DLLs need DllMain called to actually start their functionality
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
+        ManualInject->hMod = (HINSTANCE)0x1256; // About to calculate DllMain entry point
         PDLL_MAIN EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
         
+        ManualInject->hMod = (HINSTANCE)0x1257; // DllMain entry point calculated, about to call
         __try
         {
             // Call DllMain with DLL_PROCESS_ATTACH like AmalgamLoader
+            ManualInject->hMod = (HINSTANCE)0x1258; // Inside DllMain call
             BOOL result = EntryPoint((HMODULE)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
+            ManualInject->hMod = (HINSTANCE)0x1259; // DllMain call completed
             
             // Set status for debugging purposes (like AmalgamLoader)
             ManualInject->hMod = result ? (HINSTANCE)ManualInject->ImageBase : (HINSTANCE)0x407;
@@ -740,6 +744,18 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1255) {
             AmalgamLog("LoadDll function crashed after TLS callbacks, before DllMain");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1256) {
+            AmalgamLog("LoadDll function crashed while calculating DllMain entry point");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1257) {
+            AmalgamLog("LoadDll function crashed right before calling DllMain");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1258) {
+            AmalgamLog("LoadDll function crashed during DllMain execution");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1259) {
+            AmalgamLog("LoadDll function crashed after DllMain completed");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
