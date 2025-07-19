@@ -8,12 +8,11 @@ DWORD WINAPI LoadDll(PVOID p)
 {
     PMANUAL_INJECT ManualInject;
     HMODULE hModule;
-    DWORD64 i, Function, count, delta;
+    DWORD64 i, count, delta;
     DWORD64* ptr;
     PWORD list;
     PIMAGE_BASE_RELOCATION pIBR;
     PIMAGE_IMPORT_DESCRIPTOR pIID;
-    PIMAGE_IMPORT_BY_NAME pIBN;
     PDLL_MAIN EntryPoint;
 
     ManualInject = (PMANUAL_INJECT)p;
