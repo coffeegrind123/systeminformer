@@ -376,13 +376,35 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
     ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
     ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    ManualInject.fnLoadLibraryA = LoadLibraryA;
-    ManualInject.fnGetProcAddress = GetProcAddress;
+    // Ensure function pointers are valid in target process
+    // kernel32.dll is typically loaded at the same base address across processes
+    HMODULE hKernel32Local = GetModuleHandleA("kernel32.dll");
+    if (!hKernel32Local) {
+        AmalgamLog("Failed to get local kernel32.dll handle");
+        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return -1;
+    }
+    
+    ManualInject.fnLoadLibraryA = (pLoadLibraryA)GetProcAddress(hKernel32Local, "LoadLibraryA");
+    ManualInject.fnGetProcAddress = (pGetProcAddress)GetProcAddress(hKernel32Local, "GetProcAddress");
+    
+    if (!ManualInject.fnLoadLibraryA || !ManualInject.fnGetProcAddress) {
+        AmalgamLog("Failed to resolve kernel32 function addresses");
+        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return -1;
+    }
     
     AmalgamLog("Manual inject structure initialized - ImageBase: 0x%p", image);
     AmalgamLog("NtHeaders: 0x%p, BaseRelocation: 0x%p, ImportDirectory: 0x%p", 
                ManualInject.NtHeaders, ManualInject.BaseRelocation, ManualInject.ImportDirectory);
-    AmalgamLog("LoadLibraryA: 0x%p, GetProcAddress: 0x%p", LoadLibraryA, GetProcAddress);
+    AmalgamLog("LoadLibraryA: 0x%p, GetProcAddress: 0x%p", ManualInject.fnLoadLibraryA, ManualInject.fnGetProcAddress);
+    AmalgamLog("kernel32.dll base: 0x%p", hKernel32Local);
     AmalgamLog("Original ImageBase from PE: 0x%llX, Target ImageBase: 0x%p", 
                pINH->OptionalHeader.ImageBase, image);
 
