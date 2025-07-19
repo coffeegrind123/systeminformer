@@ -122,27 +122,41 @@ DWORD WINAPI LoadDll(PVOID p)
                 return FALSE;
             }
 
-            // Skip detailed function resolution for now since GetProcAddress also fails
-            // Most DLLs will work with basic loading, detailed imports can be resolved later
-            ManualInject->hMod = (HINSTANCE)0x123F; // Skipping function resolution
-            
-            // For essential functions, we could implement manual export table parsing
-            // but for initial injection test, skip detailed resolution
-            
-            // Just mark import table as "resolved" by setting some placeholder values
+            // Use real function resolution like AmalgamLoader
+            // This is critical - DLL will crash if we use dummy addresses
             for (; *pThunk; ++pThunk, ++pFunc)
             {
+                DWORD64 Function = 0;
+                
                 if (*pThunk & IMAGE_ORDINAL_FLAG64)
                 {
-                    // For ordinal imports, use dummy value to avoid crash
-                    *pFunc = (DWORD64)hModule + 0x1000; // Placeholder
+                    // Import by ordinal - get function by number
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    if (!Function)
+                    {
+                        // If GetProcAddress fails, this is a real error
+                        ManualInject->hMod = (HINSTANCE)0x404;
+                        return FALSE;
+                    }
                 }
                 else
                 {
-                    // For name imports, use dummy value to avoid crash  
-                    *pFunc = (DWORD64)hModule + 0x2000; // Placeholder
+                    // Import by name - get function by name
+                    PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    if (!Function)
+                    {
+                        // If GetProcAddress fails, this is a real error
+                        ManualInject->hMod = (HINSTANCE)0x405;
+                        return FALSE;
+                    }
                 }
+                
+                // Set the real function address in the import table
+                *pFunc = Function;
             }
+            
+            ManualInject->hMod = (HINSTANCE)0x123F; // Successfully resolved imports
 
             pIID++;
         }
@@ -172,23 +186,19 @@ DWORD WINAPI LoadDll(PVOID p)
         
         __try
         {
-            // Call DllMain with DLL_PROCESS_ATTACH - this is what actually "starts" the DLL
+            // Call DllMain with DLL_PROCESS_ATTACH like AmalgamLoader
             BOOL result = EntryPoint((HMODULE)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
+            
+            // Set status for debugging purposes (like AmalgamLoader)
             ManualInject->hMod = result ? (HINSTANCE)ManualInject->ImageBase : (HINSTANCE)0x407;
             
-            // Even if DllMain returns FALSE, the mapping was successful
-            // Some DLLs return FALSE but still work
-            if (!result) {
-                ManualInject->hMod = (HINSTANCE)0x201; // DllMain returned FALSE but mapping succeeded
-            }
-            
-            return TRUE; // Always return TRUE since mapping succeeded
+            return result; // Return actual DllMain result like AmalgamLoader
         }
         __except(EXCEPTION_EXECUTE_HANDLER)
         {
-            // DLL entry point crashed - but we still have the mapped DLL
-            ManualInject->hMod = (HINSTANCE)0x408; // Entry point crashed
-            return TRUE; // Still return TRUE since mapping succeeded
+            // DLL entry point crashed
+            ManualInject->hMod = (HINSTANCE)0x408;
+            return FALSE; // Return FALSE on crash like AmalgamLoader
         }
     }
 
