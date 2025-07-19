@@ -715,7 +715,7 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
             AmalgamLog("LoadDll function completed successfully");
         }
         else {
-            AmalgamLog("LoadDll function status unknown (hMod: 0x%p)", statusCheck.hMod);
+            AmalgamLog("LoadDll function status unknown (hMod: 0x%p, exit code: %ld)", statusCheck.hMod, dwExitCode);
         }
     }
     
