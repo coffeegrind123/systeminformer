@@ -131,14 +131,36 @@ DWORD WINAPI LoadDll(PVOID p)
 
             if (!pThunk) { pThunk = pFunc; }
 
+            ManualInject->hMod = (HINSTANCE)0x123A; // Before DLL name string access
+            
+            // Validate that the import name pointer is within our mapped memory
+            if (pIID->Name == 0 || pIID->Name > 0x1000000) {
+                ManualInject->hMod = (HINSTANCE)0x123C; // Invalid import name pointer
+                return FALSE;
+            }
+            
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
             
-            // Simple validation that the string is accessible
-            ManualInject->hMod = (HINSTANCE)0x123A; // Before LoadLibraryA call
-            
-            // Try to access the first few characters to validate string accessibility
-            if (importName[0] == 0 || importName[1] == 0) {
-                ManualInject->hMod = (HINSTANCE)0x123C; // String validation failed
+            // Safely try to access the string using exception handling
+            __try {
+                // Validate string accessibility and basic content
+                if (importName[0] == 0 || importName[1] == 0) {
+                    ManualInject->hMod = (HINSTANCE)0x123C; // Empty string
+                    return FALSE;
+                }
+                
+                // Ensure string is reasonable length (DLL names shouldn't be too long)
+                int len = 0;
+                for (int i = 0; i < 260 && importName[i] != 0; i++) {
+                    len++;
+                }
+                if (len == 0 || len >= 260) {
+                    ManualInject->hMod = (HINSTANCE)0x123C; // Invalid string length
+                    return FALSE;
+                }
+            }
+            __except(EXCEPTION_EXECUTE_HANDLER) {
+                ManualInject->hMod = (HINSTANCE)0x123C; // String access crashed
                 return FALSE;
             }
             
@@ -637,7 +659,7 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
             AmalgamLog("LoadDll function crashed during import directory access");
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123A) {
-            AmalgamLog("LoadDll function crashed during LoadLibraryA call");
+            AmalgamLog("LoadDll function crashed during DLL name string access");
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123B) {
             AmalgamLog("LoadDll function crashed after LoadLibraryA, during GetProcAddress");
