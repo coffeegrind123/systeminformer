@@ -125,6 +125,14 @@ DWORD WINAPI LoadDll(PVOID p)
     {
         ManualInject->hMod = (HINSTANCE)0x1239; // Starting import processing
         
+        // Validate import directory is within reasonable bounds
+        LPBYTE baseAddr = (LPBYTE)ManualInject->ImageBase;
+        LPBYTE importAddr = (LPBYTE)pIID;
+        if (importAddr < baseAddr || importAddr > baseAddr + 0x10000000) {
+            ManualInject->hMod = (HINSTANCE)0x1244; // Import directory out of bounds
+            return FALSE;
+        }
+        
         // Safely access import directory entries with exception handling
         __try {
             while (pIID->Name)
@@ -150,9 +158,11 @@ DWORD WINAPI LoadDll(PVOID p)
             __try {
                 // Validate string accessibility and basic content
                 if (importName[0] == 0 || importName[1] == 0) {
-                    ManualInject->hMod = (HINSTANCE)0x123C; // Empty string
+                    ManualInject->hMod = (HINSTANCE)0x1242; // Empty string
                     return FALSE;
                 }
+                
+                ManualInject->hMod = (HINSTANCE)0x1243; // String access successful
                 
                 // Ensure string is reasonable length (DLL names shouldn't be too long)
                 int len = 0;
@@ -691,6 +701,15 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1241) {
             AmalgamLog("LoadDll function crashed during import directory access");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1242) {
+            AmalgamLog("LoadDll function found empty DLL name string");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1243) {
+            AmalgamLog("LoadDll function crashed after successful string access");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1244) {
+            AmalgamLog("LoadDll function failed - import directory pointer out of bounds");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
