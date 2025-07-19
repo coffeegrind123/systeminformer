@@ -27,7 +27,7 @@ DWORD64 ManualGetProcAddress(HMODULE hModule, LPCSTR lpProcName)
     // Check if importing by ordinal
     if ((DWORD64)lpProcName <= 0xFFFF)
     {
-        DWORD ordinal = (DWORD)lpProcName - pExportDir->Base;
+        DWORD ordinal = (DWORD)(DWORD64)lpProcName - pExportDir->Base;
         if (ordinal < pExportDir->NumberOfFunctions)
         {
             return (DWORD64)hModule + pFunctions[ordinal];
