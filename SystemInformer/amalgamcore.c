@@ -229,21 +229,29 @@ DWORD WINAPI LoadDll(PVOID p)
         }
     }
 
+    ManualInject->hMod = (HINSTANCE)0x1250; // About to execute TLS callbacks
+    
     // Execute TLS callbacks
     if (ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size)
     {
+        ManualInject->hMod = (HINSTANCE)0x1251; // TLS directory found, processing
         PIMAGE_TLS_DIRECTORY64 pTLS = (PIMAGE_TLS_DIRECTORY64)((LPBYTE)ManualInject->ImageBase + 
             ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
         
         if (pTLS && pTLS->AddressOfCallBacks)
         {
+            ManualInject->hMod = (HINSTANCE)0x1252; // TLS callbacks found, about to call
             PIMAGE_TLS_CALLBACK* pCallback = (PIMAGE_TLS_CALLBACK*)pTLS->AddressOfCallBacks;
             for (; pCallback && *pCallback; ++pCallback)
             {
+                ManualInject->hMod = (HINSTANCE)0x1253; // About to call TLS callback
                 (*pCallback)((LPVOID)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
+                ManualInject->hMod = (HINSTANCE)0x1254; // TLS callback completed
             }
         }
     }
+    
+    ManualInject->hMod = (HINSTANCE)0x1255; // TLS callbacks completed, about to call DllMain
 
     // Try to call DLL main with improved error handling 
     // Many DLLs need DllMain called to actually start their functionality
@@ -714,6 +722,24 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x124E) {
             AmalgamLog("LoadDll function failed - invalid import by name pointer");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1250) {
+            AmalgamLog("LoadDll function crashed before TLS callback processing");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1251) {
+            AmalgamLog("LoadDll function crashed during TLS directory processing");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1252) {
+            AmalgamLog("LoadDll function crashed before calling TLS callbacks");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1253) {
+            AmalgamLog("LoadDll function crashed during TLS callback execution");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1254) {
+            AmalgamLog("LoadDll function crashed after TLS callback completed");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1255) {
+            AmalgamLog("LoadDll function crashed after TLS callbacks, before DllMain");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
