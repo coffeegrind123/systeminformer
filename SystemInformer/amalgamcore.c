@@ -9,16 +9,18 @@ DWORD64 ManualGetProcAddress(HMODULE hModule, LPCSTR lpProcName)
 {
     if (!hModule || !lpProcName) return 0;
     
-    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hModule;
-    if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) return 0;
-    
-    PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)hModule + pDosHeader->e_lfanew);
-    if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE) return 0;
-    
-    PIMAGE_EXPORT_DIRECTORY pExportDir = (PIMAGE_EXPORT_DIRECTORY)((LPBYTE)hModule + 
-        pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
-    
-    if (!pExportDir) return 0;
+    // Add exception handling around all export table access
+    __try {
+        PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hModule;
+        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+        
+        PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)hModule + pDosHeader->e_lfanew);
+        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE) return 0;
+        
+        PIMAGE_EXPORT_DIRECTORY pExportDir = (PIMAGE_EXPORT_DIRECTORY)((LPBYTE)hModule + 
+            pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
+        
+        if (!pExportDir) return 0;
     
     DWORD* pFunctions = (DWORD*)((LPBYTE)hModule + pExportDir->AddressOfFunctions);
     DWORD* pNames = (DWORD*)((LPBYTE)hModule + pExportDir->AddressOfNames);
@@ -58,6 +60,12 @@ DWORD64 ManualGetProcAddress(HMODULE hModule, LPCSTR lpProcName)
     }
     
     return 0;
+    
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        // Export table access crashed - return 0 to indicate failure
+        return 0;
+    }
 }
 
 // Position-independent shellcode function
