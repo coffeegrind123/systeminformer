@@ -223,7 +223,9 @@ DWORD WINAPI LoadDll(PVOID p)
                 if (*pThunk & IMAGE_ORDINAL_FLAG64)
                 {
                     // Import by ordinal - use manual export table parsing
+                    ManualInject->hMod = (HINSTANCE)0x1247; // About to call ManualGetProcAddress (ordinal)
                     Function = ManualGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    ManualInject->hMod = (HINSTANCE)0x1248; // ManualGetProcAddress (ordinal) completed
                     if (!Function)
                     {
                         // If function resolution fails, this is a real error
@@ -234,8 +236,11 @@ DWORD WINAPI LoadDll(PVOID p)
                 else
                 {
                     // Import by name - use manual export table parsing
+                    ManualInject->hMod = (HINSTANCE)0x1249; // About to access import by name structure
                     PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                    ManualInject->hMod = (HINSTANCE)0x124A; // About to call ManualGetProcAddress (name)
                     Function = ManualGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    ManualInject->hMod = (HINSTANCE)0x124B; // ManualGetProcAddress (name) completed
                     if (!Function)
                     {
                         // If function resolution fails, this is a real error
@@ -720,6 +725,21 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1246) {
             AmalgamLog("LoadDll function crashed during function resolution");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1247) {
+            AmalgamLog("LoadDll function crashed in ManualGetProcAddress (ordinal import)");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1248) {
+            AmalgamLog("LoadDll function crashed after ManualGetProcAddress (ordinal) completed");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1249) {
+            AmalgamLog("LoadDll function crashed accessing import by name structure");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x124A) {
+            AmalgamLog("LoadDll function crashed in ManualGetProcAddress (name import)");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x124B) {
+            AmalgamLog("LoadDll function crashed after ManualGetProcAddress (name) completed");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
