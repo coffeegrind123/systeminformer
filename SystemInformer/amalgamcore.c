@@ -124,8 +124,11 @@ DWORD WINAPI LoadDll(PVOID p)
     if (pIID)
     {
         ManualInject->hMod = (HINSTANCE)0x1239; // Starting import processing
-        while (pIID->Name)
-        {
+        
+        // Safely access import directory entries with exception handling
+        __try {
+            while (pIID->Name)
+            {
             DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
             DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
 
@@ -234,6 +237,11 @@ DWORD WINAPI LoadDll(PVOID p)
             ManualInject->hMod = (HINSTANCE)0x123F; // Successfully resolved imports
 
             pIID++;
+            }
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER) {
+            ManualInject->hMod = (HINSTANCE)0x1241; // Import directory access crashed
+            return FALSE;
         }
     }
 
@@ -680,6 +688,9 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1240) {
             AmalgamLog("LoadDll function using placeholder function resolution (GetProcAddress bypass)");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1241) {
+            AmalgamLog("LoadDll function crashed during import directory access");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
