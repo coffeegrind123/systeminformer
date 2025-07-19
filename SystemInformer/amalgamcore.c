@@ -2,6 +2,7 @@
 #include <amalgamcore.h>
 
 // RtlAdjustPrivilege is already declared in phlib headers
+typedef BOOL(WINAPI* PDLL_MAIN)(HMODULE, DWORD, PVOID);
 
 // Position-independent shellcode function
 DWORD WINAPI LoadDll(PVOID p)
@@ -163,16 +164,32 @@ DWORD WINAPI LoadDll(PVOID p)
         }
     }
 
-    // Skip DLL main for now to avoid crashes - many game DLLs don't need proper initialization
-    // The DLL is successfully mapped and imports resolved, which is often sufficient
+    // Try to call DLL main with improved error handling 
+    // Many DLLs need DllMain called to actually start their functionality
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
-        // Mark entry point as available but don't call it to avoid crashes
-        ManualInject->hMod = (HINSTANCE)0x200; // Success without DllMain call
+        PDLL_MAIN EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
         
-        // TODO: For full functionality, we could call DllMain in a safer context
-        // EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
-        // But for injection testing, just having the DLL mapped is sufficient
+        __try
+        {
+            // Call DllMain with DLL_PROCESS_ATTACH - this is what actually "starts" the DLL
+            BOOL result = EntryPoint((HMODULE)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
+            ManualInject->hMod = result ? (HINSTANCE)ManualInject->ImageBase : (HINSTANCE)0x407;
+            
+            // Even if DllMain returns FALSE, the mapping was successful
+            // Some DLLs return FALSE but still work
+            if (!result) {
+                ManualInject->hMod = (HINSTANCE)0x201; // DllMain returned FALSE but mapping succeeded
+            }
+            
+            return TRUE; // Always return TRUE since mapping succeeded
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER)
+        {
+            // DLL entry point crashed - but we still have the mapped DLL
+            ManualInject->hMod = (HINSTANCE)0x408; // Entry point crashed
+            return TRUE; // Still return TRUE since mapping succeeded
+        }
     }
 
     ManualInject->hMod = (HINSTANCE)ManualInject->ImageBase;
