@@ -76,7 +76,16 @@ DWORD WINAPI LoadDll(PVOID p)
             if (!pThunk) { pThunk = pFunc; }
 
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
+            
+            // Simple validation that the string is accessible
             ManualInject->hMod = (HINSTANCE)0x123A; // Before LoadLibraryA call
+            
+            // Try to access the first few characters to validate string accessibility
+            if (importName[0] == 0 || importName[1] == 0) {
+                ManualInject->hMod = (HINSTANCE)0x123C; // String validation failed
+                return FALSE;
+            }
+            
             hModule = ManualInject->fnLoadLibraryA(importName);
             ManualInject->hMod = (HINSTANCE)0x123B; // After LoadLibraryA call
 
@@ -555,6 +564,9 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x123B) {
             AmalgamLog("LoadDll function crashed after LoadLibraryA, during GetProcAddress");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x123C) {
+            AmalgamLog("LoadDll function failed - import DLL name string validation failed");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
