@@ -13,7 +13,7 @@ DWORD WINAPI LoadDll(PVOID p)
     PWORD list;
     PIMAGE_BASE_RELOCATION pIBR;
     PIMAGE_IMPORT_DESCRIPTOR pIID;
-    PDLL_MAIN EntryPoint;
+    // PDLL_MAIN EntryPoint; // Removed since we're not calling DllMain
 
     ManualInject = (PMANUAL_INJECT)p;
 
