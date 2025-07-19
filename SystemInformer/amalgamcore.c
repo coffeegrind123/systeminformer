@@ -195,8 +195,15 @@ DWORD WINAPI LoadDll(PVOID p)
                     // Import by name - use manual export table parsing
                     ManualInject->hMod = (HINSTANCE)0x1249; // About to access import by name structure
                     PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                    ManualInject->hMod = (HINSTANCE)0x124D; // Import by name structure accessed successfully
+                    
+                    // Validate pIBN pointer before using it
+                    if (!pIBN || (LPBYTE)pIBN < (LPBYTE)ManualInject->ImageBase) {
+                        ManualInject->hMod = (HINSTANCE)0x124E; // Invalid pIBN pointer
+                        return FALSE;
+                    }
+                    
                     ManualInject->hMod = (HINSTANCE)0x124A; // About to call ManualGetProcAddress (name)
-                    ManualInject->hMod = (HINSTANCE)0x124C; // Inside ManualGetProcAddress call
                     Function = ManualGetProcAddress(hModule, (LPCSTR)pIBN->Name);
                     ManualInject->hMod = (HINSTANCE)0x124B; // ManualGetProcAddress (name) completed
                     if (!Function)
@@ -701,6 +708,12 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x124C) {
             AmalgamLog("LoadDll function crashed during ManualGetProcAddress call setup");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x124D) {
+            AmalgamLog("LoadDll function crashed after accessing import by name structure");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x124E) {
+            AmalgamLog("LoadDll function failed - invalid import by name pointer");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
