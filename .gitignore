@@ -110,3 +110,4 @@ tools/thirdparty/vcpkg_installed/*
 !KSystemInformer/bin-signed/*/systeminformer.pdb
 !tools/CustomSignTool/bin/Release*/CustomSignTool.exe
 !tools/fixlib/bin/Release/fixlib.exe
+AmalgamLoader/
