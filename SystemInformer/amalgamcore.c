@@ -212,7 +212,6 @@ DWORD WINAPI LoadDll(PVOID p)
             ManualInject->hMod = (HINSTANCE)0x123F; // Successfully resolved imports
 
             pIID++;
-            }
         }
     }
 
