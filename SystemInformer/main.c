@@ -318,11 +318,11 @@ INT WINAPI wWinMain(
                                         int result = ManualMapInject(fullDllPath, pe32.th32ProcessID);
                                         
                                         CloseHandle(hProcessSnap);
-                                        return result == 0 ? 0 : 1; // Exit with proper code
+                                        // Continue to normal SystemInformer initialization instead of exiting
                                     }
                                     
                                     CloseHandle(hProcessSnap);
-                                    return 1; // Exit with error - process not ready
+                                    // Continue to normal SystemInformer initialization even if process not ready
                                 }
                             } while (Process32Next(hProcessSnap, &pe32));
                         }
