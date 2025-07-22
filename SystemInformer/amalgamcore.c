@@ -5,6 +5,15 @@
 #include <winnt.h>
 #include <amalgamcore.h>
 
+// Debug configuration - set to 1 to enable logging, 0 to disable completely
+#define AMALGAMDEBUG 0
+
+#if AMALGAMDEBUG
+#define DEBUG_MARKER(inject, value) ((inject)->hMod = (HINSTANCE)(value))
+#else
+#define DEBUG_MARKER(inject, value) ((void)0)
+#endif
+
 // Types that were provided by phapp.h  
 typedef LONG NTSTATUS;
 typedef BOOLEAN *PBOOLEAN;
@@ -37,6 +46,7 @@ typedef VOID (NTAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID R
 
 // Simple debug logging implementation
 void AmalgamLog(const char* fmt, ...) {
+#if AMALGAMDEBUG
     static FILE* logFile = NULL;
     if (!logFile) {
         #ifdef _MSC_VER
@@ -58,6 +68,10 @@ void AmalgamLog(const char* fmt, ...) {
         fprintf(logFile, "\n");
         fflush(logFile);
     }
+#else
+    // Logging disabled - do nothing
+    (void)fmt; // Suppress unused parameter warning
+#endif
 }
 
 // Function declarations that were provided by phapp.h
@@ -91,17 +105,17 @@ DWORD WINAPI LoadDll(PVOID p)
     }
 
     // Mark that we entered the function successfully
-    ManualInject->hMod = (HINSTANCE)0x1234; // Entry marker
+    DEBUG_MARKER(ManualInject, 0x1234); // Entry marker
 
     // Handle relocations
     pIBR = ManualInject->BaseRelocation;
-    ManualInject->hMod = (HINSTANCE)0x1235; // Before delta calculation
+    DEBUG_MARKER(ManualInject, 0x1235); // Before delta calculation
     delta = (DWORD64)((LPBYTE)ManualInject->ImageBase - ManualInject->NtHeaders->OptionalHeader.ImageBase);
-    ManualInject->hMod = (HINSTANCE)0x1236; // After delta calculation
+    DEBUG_MARKER(ManualInject, 0x1236); // After delta calculation
 
     if (pIBR && delta != 0)
     {
-        ManualInject->hMod = (HINSTANCE)0x1237; // Starting relocations
+        DEBUG_MARKER(ManualInject, 0x1237); // Starting relocations
         while (pIBR->VirtualAddress)
         {
             if (pIBR->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
@@ -128,53 +142,53 @@ DWORD WINAPI LoadDll(PVOID p)
         }
     }
 
-    ManualInject->hMod = (HINSTANCE)0x1238; // Relocations complete
+    DEBUG_MARKER(ManualInject, 0x1238); // Relocations complete
     
     // Handle imports
     pIID = ManualInject->ImportDirectory;
 
     if (pIID)
     {
-        ManualInject->hMod = (HINSTANCE)0x1239; // Starting import processing
+        DEBUG_MARKER(ManualInject, 0x1239); // Starting import processing
         
         // Loop through each DLL that needs to be imported (exact AmalgamLoader approach)
-        ManualInject->hMod = (HINSTANCE)0x1260; // About to check pIID->Name
+        DEBUG_MARKER(ManualInject, 0x1260); // About to check pIID->Name
         while (pIID->Name)
         {
-            ManualInject->hMod = (HINSTANCE)0x1261; // Inside while loop, processing DLL
+            DEBUG_MARKER(ManualInject, 0x1261); // Inside while loop, processing DLL
             // Get pointers to the thunk tables (as shown in tutorial)
-            ManualInject->hMod = (HINSTANCE)0x1262; // About to access OriginalFirstThunk
+            DEBUG_MARKER(ManualInject, 0x1262); // About to access OriginalFirstThunk
             DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
-            ManualInject->hMod = (HINSTANCE)0x1263; // About to access FirstThunk
+            DEBUG_MARKER(ManualInject, 0x1263); // About to access FirstThunk
             DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
 
             // If OriginalFirstThunk not defined, use FirstThunk (as per tutorial)
-            ManualInject->hMod = (HINSTANCE)0x1264; // Checking OriginalFirstThunk
+            DEBUG_MARKER(ManualInject, 0x1264); // Checking OriginalFirstThunk
             if (!pThunk) { pThunk = pFunc; }
 
             // Load the required DLL module
-            ManualInject->hMod = (HINSTANCE)0x1265; // About to access pIID->Name
+            DEBUG_MARKER(ManualInject, 0x1265); // About to access pIID->Name
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
-            ManualInject->hMod = (HINSTANCE)0x1266; // About to call LoadLibraryA
+            DEBUG_MARKER(ManualInject, 0x1266); // About to call LoadLibraryA
             
             __try
             {
                 hModule = ManualInject->fnLoadLibraryA(importName);
-                ManualInject->hMod = (HINSTANCE)0x1267; // LoadLibraryA completed successfully
+                DEBUG_MARKER(ManualInject, 0x1267); // LoadLibraryA completed successfully
             }
             __except(EXCEPTION_EXECUTE_HANDLER)
             {
-                ManualInject->hMod = (HINSTANCE)0x1268; // LoadLibraryA crashed
+                DEBUG_MARKER(ManualInject, 0x1268); // LoadLibraryA crashed
                 return FALSE;
             }
 
             if (!hModule)
             {
-                ManualInject->hMod = (HINSTANCE)0x404;
+                DEBUG_MARKER(ManualInject, 0x404);
                 return FALSE;
             }
             
-            ManualInject->hMod = (HINSTANCE)0x1246; // DLL module resolved, starting function resolution
+            DEBUG_MARKER(ManualInject, 0x1246); // DLL module resolved, starting function resolution
 
             // Process each function import in this DLL (like ProcessClient.cpp)
             for (; *pThunk; ++pThunk, ++pFunc)
@@ -183,12 +197,12 @@ DWORD WINAPI LoadDll(PVOID p)
                 if (*pThunk & IMAGE_ORDINAL_FLAG64)
                 {
                     // Import by ordinal (64-bit) - function imported by number
-                    ManualInject->hMod = (HINSTANCE)0x1247; // About to call GetProcAddress (ordinal)
+                    DEBUG_MARKER(ManualInject, 0x1247); // About to call GetProcAddress (ordinal)
                     Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
-                    ManualInject->hMod = (HINSTANCE)0x1248; // GetProcAddress (ordinal) completed
+                    DEBUG_MARKER(ManualInject, 0x1248); // GetProcAddress (ordinal) completed
                     if (!Function)
                     {
-                        ManualInject->hMod = (HINSTANCE)0x405; // Ordinal import failed
+                        DEBUG_MARKER(ManualInject, 0x405); // Ordinal import failed
                         return FALSE;
                     }
                     *pFunc = Function; // Update IAT with function address
@@ -196,27 +210,27 @@ DWORD WINAPI LoadDll(PVOID p)
                 else
                 {
                     // Import by name (64-bit) - function imported by name
-                    ManualInject->hMod = (HINSTANCE)0x1249; // About to access import by name structure
+                    DEBUG_MARKER(ManualInject, 0x1249); // About to access import by name structure
                     pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
-                    ManualInject->hMod = (HINSTANCE)0x124A; // About to call GetProcAddress (name)
+                    DEBUG_MARKER(ManualInject, 0x124A); // About to call GetProcAddress (name)
                     Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
-                    ManualInject->hMod = (HINSTANCE)0x124B; // GetProcAddress (name) completed
+                    DEBUG_MARKER(ManualInject, 0x124B); // GetProcAddress (name) completed
                     if (!Function)
                     {
-                        ManualInject->hMod = (HINSTANCE)0x406; // Name import failed
+                        DEBUG_MARKER(ManualInject, 0x406); // Name import failed
                         return FALSE;
                     }
                     *pFunc = Function; // Update IAT with function address
                 }
             }
             
-            ManualInject->hMod = (HINSTANCE)0x123F; // Successfully resolved imports
+            DEBUG_MARKER(ManualInject, 0x123F); // Successfully resolved imports
 
             pIID++;
         }
     }
 
-    ManualInject->hMod = (HINSTANCE)0x1250; // About to execute TLS callbacks
+    DEBUG_MARKER(ManualInject, 0x1250); // About to execute TLS callbacks
     
     // Execute TLS callbacks
     if (ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size)
@@ -224,40 +238,40 @@ DWORD WINAPI LoadDll(PVOID p)
         PIMAGE_TLS_DIRECTORY64 pTLS;
         PIMAGE_TLS_CALLBACK* pCallback;
         
-        ManualInject->hMod = (HINSTANCE)0x1251; // TLS directory found, processing
+        DEBUG_MARKER(ManualInject, 0x1251); // TLS directory found, processing
         pTLS = (PIMAGE_TLS_DIRECTORY64)((LPBYTE)ManualInject->ImageBase + 
             ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
         
         if (pTLS && pTLS->AddressOfCallBacks)
         {
-            ManualInject->hMod = (HINSTANCE)0x1252; // TLS callbacks found, about to call
+            DEBUG_MARKER(ManualInject, 0x1252); // TLS callbacks found, about to call
             pCallback = (PIMAGE_TLS_CALLBACK*)pTLS->AddressOfCallBacks;
             for (; pCallback && *pCallback; ++pCallback)
             {
-                ManualInject->hMod = (HINSTANCE)0x1253; // About to call TLS callback
+                DEBUG_MARKER(ManualInject, 0x1253); // About to call TLS callback
                 (*pCallback)((LPVOID)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
-                ManualInject->hMod = (HINSTANCE)0x1254; // TLS callback completed
+                DEBUG_MARKER(ManualInject, 0x1254); // TLS callback completed
             }
         }
     }
     
-    ManualInject->hMod = (HINSTANCE)0x1255; // TLS callbacks completed, about to call DllMain
+    DEBUG_MARKER(ManualInject, 0x1255); // TLS callbacks completed, about to call DllMain
 
     // Try to call DLL main with improved error handling 
     // Many DLLs need DllMain called to actually start their functionality
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
         
-        ManualInject->hMod = (HINSTANCE)0x1256; // About to calculate DllMain entry point
+        DEBUG_MARKER(ManualInject, 0x1256); // About to calculate DllMain entry point
         EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
         
-        ManualInject->hMod = (HINSTANCE)0x1257; // DllMain entry point calculated, about to call
+        DEBUG_MARKER(ManualInject, 0x1257); // DllMain entry point calculated, about to call
         __try
         {
             // Call DllMain with DLL_PROCESS_ATTACH like AmalgamLoader
-            ManualInject->hMod = (HINSTANCE)0x1258; // Inside DllMain call
+            DEBUG_MARKER(ManualInject, 0x1258); // Inside DllMain call
             BOOL result = EntryPoint((HMODULE)ManualInject->ImageBase, DLL_PROCESS_ATTACH, NULL);
-            ManualInject->hMod = (HINSTANCE)0x1259; // DllMain call completed
+            DEBUG_MARKER(ManualInject, 0x1259); // DllMain call completed
             
             // Set status for debugging purposes (like AmalgamLoader)
             ManualInject->hMod = result ? (HINSTANCE)ManualInject->ImageBase : (HINSTANCE)0x407;
@@ -267,7 +281,7 @@ DWORD WINAPI LoadDll(PVOID p)
         __except(EXCEPTION_EXECUTE_HANDLER)
         {
             // DLL entry point crashed
-            ManualInject->hMod = (HINSTANCE)0x408;
+            DEBUG_MARKER(ManualInject, 0x408);
             return FALSE; // Return FALSE on crash like AmalgamLoader
         }
     }
