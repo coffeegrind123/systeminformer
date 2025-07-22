@@ -2,17 +2,48 @@
 #include <TlHelp32.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <winnt.h>
 #include <amalgamcore.h>
 
 // Types that were provided by phapp.h  
 typedef LONG NTSTATUS;
 typedef BOOLEAN *PBOOLEAN;
 
+// PE constants that may not be defined in Windows.h
+#ifndef IMAGE_DIRECTORY_ENTRY_TLS
+#define IMAGE_DIRECTORY_ENTRY_TLS 9
+#endif
+
+#ifndef IMAGE_REL_BASED_DIR64
+#define IMAGE_REL_BASED_DIR64 10
+#endif
+
+// TLS callback typedef
+typedef VOID (NTAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID Reserved);
+
+// Ensure PE format constants are defined
+#ifndef IMAGE_DIRECTORY_ENTRY_TLS
+#define IMAGE_DIRECTORY_ENTRY_TLS 9
+#endif
+
+#ifndef IMAGE_ORDINAL_FLAG64
+#define IMAGE_ORDINAL_FLAG64 0x8000000000000000
+#endif
+
+// TLS callback type if not defined
+#ifndef PIMAGE_TLS_CALLBACK
+typedef VOID (NTAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID Reserved);
+#endif
+
 // Simple debug logging implementation
 void AmalgamLog(const char* fmt, ...) {
     static FILE* logFile = NULL;
     if (!logFile) {
+        #ifdef _MSC_VER
         fopen_s(&logFile, "AmalgamCore.log", "a");
+        #else
+        logFile = fopen("AmalgamCore.log", "a");
+        #endif
     }
     if (logFile) {
         SYSTEMTIME st;
@@ -190,14 +221,17 @@ DWORD WINAPI LoadDll(PVOID p)
     // Execute TLS callbacks
     if (ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size)
     {
+        PIMAGE_TLS_DIRECTORY64 pTLS;
+        PIMAGE_TLS_CALLBACK* pCallback;
+        
         ManualInject->hMod = (HINSTANCE)0x1251; // TLS directory found, processing
-        PIMAGE_TLS_DIRECTORY64 pTLS = (PIMAGE_TLS_DIRECTORY64)((LPBYTE)ManualInject->ImageBase + 
+        pTLS = (PIMAGE_TLS_DIRECTORY64)((LPBYTE)ManualInject->ImageBase + 
             ManualInject->NtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
         
         if (pTLS && pTLS->AddressOfCallBacks)
         {
             ManualInject->hMod = (HINSTANCE)0x1252; // TLS callbacks found, about to call
-            PIMAGE_TLS_CALLBACK* pCallback = (PIMAGE_TLS_CALLBACK*)pTLS->AddressOfCallBacks;
+            pCallback = (PIMAGE_TLS_CALLBACK*)pTLS->AddressOfCallBacks;
             for (; pCallback && *pCallback; ++pCallback)
             {
                 ManualInject->hMod = (HINSTANCE)0x1253; // About to call TLS callback
@@ -213,8 +247,11 @@ DWORD WINAPI LoadDll(PVOID p)
     // Many DLLs need DllMain called to actually start their functionality
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
+        PDLL_MAIN EntryPoint;
+        BOOL result;
+        
         ManualInject->hMod = (HINSTANCE)0x1256; // About to calculate DllMain entry point
-        PDLL_MAIN EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
+        EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
         
         ManualInject->hMod = (HINSTANCE)0x1257; // DllMain entry point calculated, about to call
         __try
