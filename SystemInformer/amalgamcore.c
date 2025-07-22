@@ -1,15 +1,42 @@
 #include <Windows.h>
 #include <TlHelp32.h>
+#include <stdio.h>
+#include <stdarg.h>
 #include <amalgamcore.h>
 
 // Types that were provided by phapp.h  
 typedef LONG NTSTATUS;
 typedef BOOLEAN *PBOOLEAN;
 
+// Simple debug logging implementation
+void AmalgamLog(const char* fmt, ...) {
+    static FILE* logFile = NULL;
+    if (!logFile) {
+        fopen_s(&logFile, "AmalgamCore.log", "a");
+    }
+    if (logFile) {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        fprintf(logFile, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
+        
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(logFile, fmt, args);
+        va_end(args);
+        
+        fprintf(logFile, "\n");
+        fflush(logFile);
+    }
+}
+
 // Function declarations that were provided by phapp.h
-extern "C" NTSTATUS NTAPI RtlAdjustPrivilege(ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled);
+NTSTATUS NTAPI RtlAdjustPrivilege(ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled);
 
 typedef BOOL(WINAPI* PDLL_MAIN)(HMODULE, DWORD, PVOID);
+
+// Forward declarations
+DWORD WINAPI LoadDll(PVOID p);
+DWORD WINAPI LoadDllEnd(void);
 
 // ManualGetProcAddress is no longer needed - we use the real fnGetProcAddress from ManualInject structure
 

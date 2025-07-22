@@ -3,30 +3,13 @@
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 // Pure AmalgamLoader manual mapping functionality
 // With debug logging for troubleshooting
 
 // Simple debug logging (writes to AmalgamCore.log in SystemInformer directory)
-inline void AmalgamLog(const char* fmt, ...) {
-    static FILE* logFile = NULL;
-    if (!logFile) {
-        fopen_s(&logFile, "AmalgamCore.log", "a");
-    }
-    if (logFile) {
-        SYSTEMTIME st;
-        GetLocalTime(&st);
-        fprintf(logFile, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
-        
-        va_list args;
-        va_start(args, fmt);
-        vfprintf(logFile, fmt, args);
-        va_end(args);
-        
-        fprintf(logFile, "\n");
-        fflush(logFile);
-    }
-}
+void AmalgamLog(const char* fmt, ...);
 
 typedef HMODULE(WINAPI* pLoadLibraryA)(LPCSTR);
 typedef FARPROC(WINAPI* pGetProcAddress)(HMODULE, LPCSTR);
