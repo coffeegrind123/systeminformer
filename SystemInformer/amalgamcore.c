@@ -587,6 +587,26 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     GetExitCodeThread(hThread, &threadExitCode);
     AmalgamLog("Remote thread completed with exit code: %d", threadExitCode);
     
+    // Check for critical system errors that indicate injection failure
+    if (threadExitCode == 0xC0000005) {  // STATUS_ACCESS_VIOLATION
+        AmalgamLog("ERROR: DLL crashed during initialization (Access Violation)");
+        CloseHandle(hThread);
+        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return -1;
+    }
+    if (threadExitCode == 0xC000001D) {  // STATUS_ILLEGAL_INSTRUCTION
+        AmalgamLog("ERROR: DLL crashed during initialization (Illegal Instruction)");
+        CloseHandle(hThread);
+        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return -1;
+    }
+    
     // Read back the status from the injected structure
     MANUAL_INJECT statusCheck;
     if (ReadProcessMemory(hProcess, mem1, &statusCheck, sizeof(statusCheck), NULL)) {
