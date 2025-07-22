@@ -156,7 +156,17 @@ DWORD WINAPI LoadDll(PVOID p)
             ManualInject->hMod = (HINSTANCE)0x1265; // About to access pIID->Name
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
             ManualInject->hMod = (HINSTANCE)0x1266; // About to call LoadLibraryA
-            hModule = ManualInject->fnLoadLibraryA(importName);
+            
+            __try
+            {
+                hModule = ManualInject->fnLoadLibraryA(importName);
+                ManualInject->hMod = (HINSTANCE)0x1267; // LoadLibraryA completed successfully
+            }
+            __except(EXCEPTION_EXECUTE_HANDLER)
+            {
+                ManualInject->hMod = (HINSTANCE)0x1268; // LoadLibraryA crashed
+                return FALSE;
+            }
 
             if (!hModule)
             {
