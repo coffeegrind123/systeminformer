@@ -317,7 +317,30 @@ DWORD WINAPI GetProcessIdByName(const wchar_t* processName)
     return 0;
 }
 
-int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
+DWORD WINAPI GetProcessIdByNameExcludeSelf(const wchar_t* processName)
+{
+    PROCESSENTRY32 entry;
+    entry.dwSize = sizeof(PROCESSENTRY32);
+    DWORD currentPid = GetCurrentProcessId();
+    
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (Process32First(snapshot, &entry) == TRUE)
+    {
+        while (Process32Next(snapshot, &entry) == TRUE)
+        {
+            if (wcscmp(entry.szExeFile, processName) == 0 && entry.th32ProcessID != currentPid)
+            {
+                CloseHandle(snapshot);
+                return entry.th32ProcessID;
+            }
+        }
+    }
+
+    CloseHandle(snapshot);
+    return 0;
+}
+
+int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
 {
     HANDLE hProcess, hThread, hFile;
     PVOID mem1;
@@ -327,9 +350,18 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     PIMAGE_NT_HEADERS pINH;
     MANUAL_INJECT ManualInject;
     BOOLEAN bl;
+    DWORD processId;
 
-    AmalgamLog("Manual mapping injection initialized for PID %d", processId);
+    AmalgamLog("Manual mapping injection initialized for process: %ws", processName);
     AmalgamLog("DLL path: %ws", dllPath);
+
+    // Get process ID from process name (excluding self to avoid self-injection)
+    processId = GetProcessIdByNameExcludeSelf(processName);
+    if (processId == 0) {
+        AmalgamLog("Failed to find process: %ws (excluding self)", processName);
+        return -1;
+    }
+    AmalgamLog("Found process %ws with PID %d", processName, processId);
 
     // Enable debug privileges (critical for accessing protected processes)
     NTSTATUS status = RtlAdjustPrivilege(20, TRUE, FALSE, &bl);

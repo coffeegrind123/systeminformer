@@ -3393,8 +3393,7 @@ BOOLEAN PhUiLoadDllProcess(
     if (NT_SUCCESS(status))
     {
         // Use AmalgamCore for injection
-        DWORD processId = GetProcessId(processHandle);
-        int result = ManualMapInject(fileName->Buffer, processId);
+        int result = ManualMapInject(fileName->Buffer, Process->ProcessName->Buffer);
         status = (result == 0) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
 
         NtClose(processHandle);

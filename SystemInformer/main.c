@@ -314,8 +314,8 @@ INT WINAPI wWinMain(
                                         swprintf_s(fullDllPath, MAX_PATH, L"%s\\%s", exePath, foundDll);
                                         
                                         // Use AmalgamCore for injection
-                                        extern int ManualMapInject(const wchar_t* dllPath, DWORD processId);
-                                        int result = ManualMapInject(fullDllPath, pe32.th32ProcessID);
+                                        extern int ManualMapInject(const wchar_t* dllPath, const wchar_t* processName);
+                                        int result = ManualMapInject(fullDllPath, pe32.szExeFile);
                                         
                                         CloseHandle(hProcessSnap);
                                         // Continue to normal SystemInformer initialization instead of exiting
