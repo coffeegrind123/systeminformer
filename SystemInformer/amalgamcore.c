@@ -1,8 +1,17 @@
-#include <phapp.h>
+#include <Windows.h>
+#include <TlHelp32.h>
+#include <iostream>
+#include <string>
+#include <cstring>
 #include <amalgamcore.h>
-#include <psapi.h>
 
-// RtlAdjustPrivilege is already declared in phlib headers
+// Types that were provided by phapp.h  
+typedef LONG NTSTATUS;
+typedef BOOLEAN *PBOOLEAN;
+
+// Function declarations that were provided by phapp.h
+extern "C" NTSTATUS NTAPI RtlAdjustPrivilege(ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled);
+
 typedef BOOL(WINAPI* PDLL_MAIN)(HMODULE, DWORD, PVOID);
 
 // ManualGetProcAddress is no longer needed - we use the real fnGetProcAddress from ManualInject structure
@@ -80,92 +89,19 @@ DWORD WINAPI LoadDll(PVOID p)
             return FALSE;
         }
         
-        // Safely access import directory entries with exception handling
-        __try {
-            while (pIID->Name)
-            {
+        // Loop through each DLL that needs to be imported (exact AmalgamLoader approach)
+        while (pIID->Name)
+        {
+            // Get pointers to the thunk tables (as shown in tutorial)
             DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
             DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
 
+            // If OriginalFirstThunk not defined, use FirstThunk (as per tutorial)
             if (!pThunk) { pThunk = pFunc; }
 
-            ManualInject->hMod = (HINSTANCE)0x123A; // Before DLL name string access
-            
-            // Validate that the import name pointer is within our mapped memory
-            if (pIID->Name == 0 || pIID->Name > 0x1000000) {
-                ManualInject->hMod = (HINSTANCE)0x123C; // Invalid import name pointer
-                return FALSE;
-            }
-            
-            ManualInject->hMod = (HINSTANCE)0x123D; // About to calculate importName pointer
+            // Load the required DLL module
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
-            ManualInject->hMod = (HINSTANCE)0x123E; // importName pointer calculated successfully
-            
-            // Safely try to access the string using exception handling
-            __try {
-                // Validate string accessibility and basic content
-                if (importName[0] == 0 || importName[1] == 0) {
-                    ManualInject->hMod = (HINSTANCE)0x1242; // Empty string
-                    return FALSE;
-                }
-                
-                ManualInject->hMod = (HINSTANCE)0x1243; // String access successful
-                
-                // Ensure string is reasonable length (DLL names shouldn't be too long)
-                int len = 0;
-                for (int i = 0; i < 260 && importName[i] != 0; i++) {
-                    len++;
-                }
-                if (len == 0 || len >= 260) {
-                    ManualInject->hMod = (HINSTANCE)0x123C; // Invalid string length
-                    return FALSE;
-                }
-            }
-            __except(EXCEPTION_EXECUTE_HANDLER) {
-                ManualInject->hMod = (HINSTANCE)0x123C; // String access crashed
-                return FALSE;
-            }
-            
-            ManualInject->hMod = (HINSTANCE)0x1245; // About to start DLL resolution
-            
-            // Add extensive debugging around LoadLibraryA call
-            ManualInject->hMod = (HINSTANCE)0x1260; // About to validate importName pointer
-            
-            // Validate importName pointer is accessible
-            if (!importName || (LPBYTE)importName < (LPBYTE)ManualInject->ImageBase) {
-                ManualInject->hMod = (HINSTANCE)0x1261; // Invalid importName pointer
-                return FALSE;
-            }
-            
-            ManualInject->hMod = (HINSTANCE)0x1262; // importName pointer validated
-            
-            // Try to safely access the string to validate it's readable
-            __try {
-                // Read first few characters to validate string accessibility
-                char firstChar = importName[0];
-                char secondChar = importName[1];
-                if (firstChar == 0 || secondChar == 0) {
-                    ManualInject->hMod = (HINSTANCE)0x1263; // String too short
-                    return FALSE;
-                }
-                ManualInject->hMod = (HINSTANCE)0x1264; // String access successful
-            }
-            __except(EXCEPTION_EXECUTE_HANDLER) {
-                ManualInject->hMod = (HINSTANCE)0x1265; // String access crashed
-                return FALSE;
-            }
-            
-            ManualInject->hMod = (HINSTANCE)0x1266; // About to call LoadLibraryA
-            
-            // Use real LoadLibraryA like the working ProcessClient.cpp implementation
-            __try {
-                hModule = ManualInject->fnLoadLibraryA(importName);
-                ManualInject->hMod = (HINSTANCE)0x1267; // LoadLibraryA call completed
-            }
-            __except(EXCEPTION_EXECUTE_HANDLER) {
-                ManualInject->hMod = (HINSTANCE)0x1268; // LoadLibraryA call crashed
-                return FALSE;
-            }
+            hModule = ManualInject->fnLoadLibraryA(importName);
 
             if (!hModule)
             {
@@ -222,10 +158,6 @@ DWORD WINAPI LoadDll(PVOID p)
 
             pIID++;
             }
-        }
-        __except(EXCEPTION_EXECUTE_HANDLER) {
-            ManualInject->hMod = (HINSTANCE)0x1241; // Import directory access crashed
-            return FALSE;
         }
     }
 
@@ -508,48 +440,9 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
     ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
     ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    // Get kernel32.dll base address in target process for function resolution
-    // We need to find the correct addresses in the target process, not our process
-    HMODULE hKernel32Local = GetModuleHandleA("kernel32.dll");
-    
-    // Get module information from target process
-    HMODULE hModules[1024];
-    DWORD cbNeeded;
-    HMODULE hKernel32Remote = NULL;
-    
-    if (EnumProcessModules(hProcess, hModules, sizeof(hModules), &cbNeeded)) {
-        DWORD moduleCount = cbNeeded / sizeof(HMODULE);
-        for (DWORD i = 0; i < moduleCount; i++) {
-            char moduleName[MAX_PATH];
-            if (GetModuleBaseNameA(hProcess, hModules[i], moduleName, MAX_PATH)) {
-                if (_stricmp(moduleName, "kernel32.dll") == 0) {
-                    hKernel32Remote = hModules[i];
-                    break;
-                }
-            }
-        }
-    }
-    
-    if (!hKernel32Remote) {
-        AmalgamLog("Failed to find kernel32.dll in target process");
-        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
-        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
-        VirtualFree(buffer, 0, MEM_RELEASE);
-        CloseHandle(hProcess);
-        return -1;
-    }
-    
-    // Calculate function addresses in target process using offsets
-    DWORD64 loadLibraryOffset = (DWORD64)LoadLibraryA - (DWORD64)hKernel32Local;
-    DWORD64 getProcAddressOffset = (DWORD64)GetProcAddress - (DWORD64)hKernel32Local;
-    
-    ManualInject.fnLoadLibraryA = (pLoadLibraryA)((DWORD64)hKernel32Remote + loadLibraryOffset);
-    ManualInject.fnGetProcAddress = (pGetProcAddress)((DWORD64)hKernel32Remote + getProcAddressOffset);
-    
-    AmalgamLog("kernel32.dll in injector process: 0x%p", hKernel32Local);
-    AmalgamLog("kernel32.dll in target process: 0x%p", hKernel32Remote);
-    AmalgamLog("LoadLibraryA offset: 0x%llX", loadLibraryOffset);
-    AmalgamLog("GetProcAddress offset: 0x%llX", getProcAddressOffset);
+    // Use exact AmalgamLoader approach - simple direct assignment (PROVEN TO WORK)
+    ManualInject.fnLoadLibraryA = LoadLibraryA;
+    ManualInject.fnGetProcAddress = GetProcAddress;
     
     AmalgamLog("Manual inject structure initialized - ImageBase: 0x%p", image);
     AmalgamLog("NtHeaders: 0x%p, BaseRelocation: 0x%p, ImportDirectory: 0x%p", 
@@ -793,33 +686,6 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1259) {
             AmalgamLog("LoadDll function crashed after DllMain completed");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1260) {
-            AmalgamLog("LoadDll function crashed before validating importName pointer");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1261) {
-            AmalgamLog("LoadDll function failed - invalid importName pointer");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1262) {
-            AmalgamLog("LoadDll function crashed after importName pointer validation");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1263) {
-            AmalgamLog("LoadDll function failed - importName string too short");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1264) {
-            AmalgamLog("LoadDll function crashed after string access validation");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1265) {
-            AmalgamLog("LoadDll function failed - importName string access crashed");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1266) {
-            AmalgamLog("LoadDll function crashed right before LoadLibraryA call");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1267) {
-            AmalgamLog("LoadDll function crashed after LoadLibraryA call completed");
-        }
-        else if (statusCheck.hMod == (HINSTANCE)0x1268) {
-            AmalgamLog("LoadDll function failed - LoadLibraryA call crashed");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
