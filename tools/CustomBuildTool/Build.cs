@@ -708,7 +708,7 @@ namespace CustomBuildTool
                     );
 
                 File.Move(
-                    $"{BuildWorkingFolder}\\tools\\CustomSetupTool\\bin\\Release32\\CustomSetupTool.exe",
+                    $"{BuildWorkingFolder}\\tools\\CustomSetupTool\\bin\\Release64\\CustomSetupTool.exe",
                     $"{BuildOutputFolder}\\systeminformer-build-{Channel}-setup.exe"
                     );
 
