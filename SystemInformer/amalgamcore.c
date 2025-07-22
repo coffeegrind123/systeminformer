@@ -1,5 +1,6 @@
 #include <phapp.h>
 #include <amalgamcore.h>
+#include <psapi.h>
 
 // RtlAdjustPrivilege is already declared in phlib headers
 typedef BOOL(WINAPI* PDLL_MAIN)(HMODULE, DWORD, PVOID);
@@ -471,11 +472,48 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
     ManualInject.NtHeaders = (PIMAGE_NT_HEADERS)((LPBYTE)image + pIDH->e_lfanew);
     ManualInject.BaseRelocation = (PIMAGE_BASE_RELOCATION)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
     ManualInject.ImportDirectory = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)image + pINH->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-    // Ensure function pointers are valid in target process
-    // Use direct function pointers like AmalgamLoader
-    // kernel32.dll is loaded at the same address in most processes
-    ManualInject.fnLoadLibraryA = LoadLibraryA;
-    ManualInject.fnGetProcAddress = GetProcAddress;
+    // Get kernel32.dll base address in target process for function resolution
+    // We need to find the correct addresses in the target process, not our process
+    HMODULE hKernel32Local = GetModuleHandleA("kernel32.dll");
+    
+    // Get module information from target process
+    HMODULE hModules[1024];
+    DWORD cbNeeded;
+    HMODULE hKernel32Remote = NULL;
+    
+    if (EnumProcessModules(hProcess, hModules, sizeof(hModules), &cbNeeded)) {
+        DWORD moduleCount = cbNeeded / sizeof(HMODULE);
+        for (DWORD i = 0; i < moduleCount; i++) {
+            char moduleName[MAX_PATH];
+            if (GetModuleBaseNameA(hProcess, hModules[i], moduleName, MAX_PATH)) {
+                if (_stricmp(moduleName, "kernel32.dll") == 0) {
+                    hKernel32Remote = hModules[i];
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!hKernel32Remote) {
+        AmalgamLog("Failed to find kernel32.dll in target process");
+        VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return -1;
+    }
+    
+    // Calculate function addresses in target process using offsets
+    DWORD64 loadLibraryOffset = (DWORD64)LoadLibraryA - (DWORD64)hKernel32Local;
+    DWORD64 getProcAddressOffset = (DWORD64)GetProcAddress - (DWORD64)hKernel32Local;
+    
+    ManualInject.fnLoadLibraryA = (pLoadLibraryA)((DWORD64)hKernel32Remote + loadLibraryOffset);
+    ManualInject.fnGetProcAddress = (pGetProcAddress)((DWORD64)hKernel32Remote + getProcAddressOffset);
+    
+    AmalgamLog("kernel32.dll in injector process: 0x%p", hKernel32Local);
+    AmalgamLog("kernel32.dll in target process: 0x%p", hKernel32Remote);
+    AmalgamLog("LoadLibraryA offset: 0x%llX", loadLibraryOffset);
+    AmalgamLog("GetProcAddress offset: 0x%llX", getProcAddressOffset);
     
     AmalgamLog("Manual inject structure initialized - ImageBase: 0x%p", image);
     AmalgamLog("NtHeaders: 0x%p, BaseRelocation: 0x%p, ImportDirectory: 0x%p", 
