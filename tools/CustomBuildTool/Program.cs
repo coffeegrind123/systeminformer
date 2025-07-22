@@ -103,25 +103,28 @@ namespace CustomBuildTool
             {
                 Build.SetupBuildEnvironment(false);
 
-                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Release))
+                // Only build x64 Release - no plugins, no 32-bit, no ARM64
+                BuildFlags flags = BuildFlags.Build64bit | BuildFlags.BuildRelease | BuildFlags.BuildApi | BuildFlags.BuildVerbose;
+                
+                if (!Build.BuildSolution("SystemInformer.sln", flags))
                     Environment.Exit(1);
-                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Release))
-                    Environment.Exit(1);
+                // Skip plugins build - we only need SystemInformer.exe
 
-                //if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                //if (!Build.CopyDebugEngineFiles(flags))
                 //    Environment.Exit(1);
-                if (!Build.CopyTextFiles(true, BuildFlags.Release))
+                if (!Build.CopyTextFiles(true, flags))
                     Environment.Exit(1);
-                if (!Build.BuildBinZip(BuildFlags.Release))
+                if (!Build.BuildBinZip(flags))
                     Environment.Exit(1);
-                if (!Build.CopyTextFiles(false, BuildFlags.Release))
+                if (!Build.CopyTextFiles(false, flags))
                     Environment.Exit(1);
 
                 Build.ShowBuildStats();
             }
             else if (ProgramArgs.ContainsKey("-pipeline-build"))
             {
-                BuildFlags flags = BuildFlags.Release;
+                // Only build x64 Release - no plugins, no 32-bit, no ARM64
+                BuildFlags flags = BuildFlags.Build64bit | BuildFlags.BuildRelease | BuildFlags.BuildApi | BuildFlags.BuildVerbose;
 
                 Build.WriteTimeStampFile();
                 Build.SetupBuildEnvironment(true);
@@ -129,22 +132,24 @@ namespace CustomBuildTool
 
                 if (!Build.BuildSolution("SystemInformer.sln", flags))
                     Environment.Exit(1);
-                if (!Build.BuildSolution("plugins\\Plugins.sln", flags))
-                    Environment.Exit(1);
+                // Skip plugins build - we only need SystemInformer.exe
 
-                Build.CopyWow64Files(flags); // required after plugin build (dmex)
+                // Skip CopyWow64Files since we're not building 32-bit
             }
             else if (ProgramArgs.ContainsKey("-pipeline-package"))
             {
                 Build.SetupBuildEnvironment(true);
+                
+                // Only build x64 Release - no plugins, no 32-bit, no ARM64
+                BuildFlags flags = BuildFlags.Build64bit | BuildFlags.BuildRelease | BuildFlags.BuildApi | BuildFlags.BuildVerbose;
 
                 if (!Build.ResignFiles())
                     Environment.Exit(1);
-                //if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                //if (!Build.CopyDebugEngineFiles(flags))
                 //    Environment.Exit(1);
-                if (!Build.CopyTextFiles(true, BuildFlags.Release))
+                if (!Build.CopyTextFiles(true, flags))
                     Environment.Exit(1);
-                if (!Build.BuildBinZip(BuildFlags.Release))
+                if (!Build.BuildBinZip(flags))
                     Environment.Exit(1);
 
                 foreach (var (channel, _) in BuildConfig.Build_Channels)
@@ -153,7 +158,7 @@ namespace CustomBuildTool
                         Environment.Exit(1);
                 }
 
-                if (!Build.CopyTextFiles(false, BuildFlags.Release))
+                if (!Build.CopyTextFiles(false, flags))
                     Environment.Exit(1);
             }
             else if (ProgramArgs.ContainsKey("-pipeline-deploy"))
@@ -254,12 +259,14 @@ namespace CustomBuildTool
             {
                 Build.SetupBuildEnvironment(true);
 
-                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Debug))
-                    Environment.Exit(1);
-                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Debug))
-                    Environment.Exit(1);
+                // Only build x64 Debug - no plugins, no 32-bit, no ARM64
+                BuildFlags flags = BuildFlags.Build64bit | BuildFlags.BuildDebug | BuildFlags.BuildApi | BuildFlags.BuildVerbose;
 
-                //if (!Build.CopyDebugEngineFiles(BuildFlags.Debug))
+                if (!Build.BuildSolution("SystemInformer.sln", flags))
+                    Environment.Exit(1);
+                // Skip plugins build - we only need SystemInformer.exe
+
+                //if (!Build.CopyDebugEngineFiles(flags))
                 //    Environment.Exit(1);
 
                 Build.ShowBuildStats();
@@ -268,18 +275,19 @@ namespace CustomBuildTool
             {
                 Build.SetupBuildEnvironment(true);
 
-                if (!Build.BuildSolution("SystemInformer.sln", BuildFlags.Release))
-                    Environment.Exit(1);
-                if (!Build.BuildSolution("plugins\\Plugins.sln", BuildFlags.Release))
-                    Environment.Exit(1);
+                // Only build x64 Release - no plugins, no 32-bit, no ARM64
+                BuildFlags flags = BuildFlags.Build64bit | BuildFlags.BuildRelease | BuildFlags.BuildApi | BuildFlags.BuildVerbose;
 
-                //if (!Build.CopyDebugEngineFiles(BuildFlags.Release))
+                if (!Build.BuildSolution("SystemInformer.sln", flags))
+                    Environment.Exit(1);
+                // Skip plugins build - we only need SystemInformer.exe
+
+                //if (!Build.CopyDebugEngineFiles(flags))
                 //    Environment.Exit(1);
-                if (!Build.CopyWow64Files(BuildFlags.Release))
+                // Skip CopyWow64Files since we're not building 32-bit
+                if (!Build.CopyTextFiles(true, flags))
                     Environment.Exit(1);
-                if (!Build.CopyTextFiles(true, BuildFlags.Release))
-                    Environment.Exit(1);
-                if (!Build.BuildBinZip(BuildFlags.Release))
+                if (!Build.BuildBinZip(flags))
                     Environment.Exit(1);
 
                 foreach (var (channel, _) in BuildConfig.Build_Channels)
@@ -288,7 +296,7 @@ namespace CustomBuildTool
                         Environment.Exit(1);
                 }
 
-                if (!Build.CopyTextFiles(false, BuildFlags.Release))
+                if (!Build.CopyTextFiles(false, flags))
                     Environment.Exit(1);
 
                 Build.BuildPdbZip(false);

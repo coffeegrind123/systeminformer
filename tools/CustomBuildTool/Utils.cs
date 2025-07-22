@@ -1206,9 +1206,9 @@ namespace CustomBuildTool
         BuildApi = 64,
         BuildMsix = 128,
 
-        Debug = Build32bit | Build64bit | BuildArm64bit | BuildDebug | BuildApi | BuildVerbose,
-        Release = Build32bit | Build64bit | BuildArm64bit | BuildRelease | BuildApi | BuildVerbose,
-        All = Build32bit | Build64bit | BuildArm64bit | BuildDebug | BuildRelease | BuildApi | BuildVerbose,
+        Debug = Build64bit | BuildDebug | BuildApi | BuildVerbose,
+        Release = Build64bit | BuildRelease | BuildApi | BuildVerbose,
+        All = Build64bit | BuildDebug | BuildRelease | BuildApi | BuildVerbose,
     }
 
     /// <summary>
