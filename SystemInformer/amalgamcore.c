@@ -6,7 +6,7 @@
 #include <amalgamcore.h>
 
 // Debug configuration - set to 1 to enable logging, 0 to disable completely
-#define AMALGAMDEBUG 0
+#define AMALGAMDEBUG 1
 
 #if AMALGAMDEBUG
 #define DEBUG_MARKER(inject, value) ((inject)->hMod = (HINSTANCE)(value))
