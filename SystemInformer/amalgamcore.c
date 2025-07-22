@@ -247,7 +247,6 @@ DWORD WINAPI LoadDll(PVOID p)
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
         PDLL_MAIN EntryPoint;
-        BOOL result;
         
         ManualInject->hMod = (HINSTANCE)0x1256; // About to calculate DllMain entry point
         EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
