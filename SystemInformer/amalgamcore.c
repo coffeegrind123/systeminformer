@@ -128,8 +128,44 @@ DWORD WINAPI LoadDll(PVOID p)
             
             ManualInject->hMod = (HINSTANCE)0x1245; // About to start DLL resolution
             
+            // Add extensive debugging around LoadLibraryA call
+            ManualInject->hMod = (HINSTANCE)0x1260; // About to validate importName pointer
+            
+            // Validate importName pointer is accessible
+            if (!importName || (LPBYTE)importName < (LPBYTE)ManualInject->ImageBase) {
+                ManualInject->hMod = (HINSTANCE)0x1261; // Invalid importName pointer
+                return FALSE;
+            }
+            
+            ManualInject->hMod = (HINSTANCE)0x1262; // importName pointer validated
+            
+            // Try to safely access the string to validate it's readable
+            __try {
+                // Read first few characters to validate string accessibility
+                char firstChar = importName[0];
+                char secondChar = importName[1];
+                if (firstChar == 0 || secondChar == 0) {
+                    ManualInject->hMod = (HINSTANCE)0x1263; // String too short
+                    return FALSE;
+                }
+                ManualInject->hMod = (HINSTANCE)0x1264; // String access successful
+            }
+            __except(EXCEPTION_EXECUTE_HANDLER) {
+                ManualInject->hMod = (HINSTANCE)0x1265; // String access crashed
+                return FALSE;
+            }
+            
+            ManualInject->hMod = (HINSTANCE)0x1266; // About to call LoadLibraryA
+            
             // Use real LoadLibraryA like the working ProcessClient.cpp implementation
-            hModule = ManualInject->fnLoadLibraryA(importName);
+            __try {
+                hModule = ManualInject->fnLoadLibraryA(importName);
+                ManualInject->hMod = (HINSTANCE)0x1267; // LoadLibraryA call completed
+            }
+            __except(EXCEPTION_EXECUTE_HANDLER) {
+                ManualInject->hMod = (HINSTANCE)0x1268; // LoadLibraryA call crashed
+                return FALSE;
+            }
 
             if (!hModule)
             {
@@ -757,6 +793,33 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, DWORD processId)
         }
         else if (statusCheck.hMod == (HINSTANCE)0x1259) {
             AmalgamLog("LoadDll function crashed after DllMain completed");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1260) {
+            AmalgamLog("LoadDll function crashed before validating importName pointer");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1261) {
+            AmalgamLog("LoadDll function failed - invalid importName pointer");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1262) {
+            AmalgamLog("LoadDll function crashed after importName pointer validation");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1263) {
+            AmalgamLog("LoadDll function failed - importName string too short");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1264) {
+            AmalgamLog("LoadDll function crashed after string access validation");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1265) {
+            AmalgamLog("LoadDll function failed - importName string access crashed");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1266) {
+            AmalgamLog("LoadDll function crashed right before LoadLibraryA call");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1267) {
+            AmalgamLog("LoadDll function crashed after LoadLibraryA call completed");
+        }
+        else if (statusCheck.hMod == (HINSTANCE)0x1268) {
+            AmalgamLog("LoadDll function failed - LoadLibraryA call crashed");
         }
         else if (statusCheck.hMod == statusCheck.ImageBase) {
             AmalgamLog("LoadDll function completed successfully");
