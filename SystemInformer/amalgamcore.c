@@ -1,8 +1,5 @@
 #include <Windows.h>
 #include <TlHelp32.h>
-#include <iostream>
-#include <string>
-#include <cstring>
 #include <amalgamcore.h>
 
 // Types that were provided by phapp.h  
