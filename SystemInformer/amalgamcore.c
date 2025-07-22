@@ -28,7 +28,7 @@ typedef BOOLEAN *PBOOLEAN;
 #endif
 
 // TLS callback typedef
-typedef VOID (NTAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID Reserved);
+typedef VOID (WINAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID Reserved);
 
 // Ensure PE format constants are defined
 #ifndef IMAGE_DIRECTORY_ENTRY_TLS
@@ -41,7 +41,7 @@ typedef VOID (NTAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID R
 
 // TLS callback type if not defined
 #ifndef PIMAGE_TLS_CALLBACK
-typedef VOID (NTAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID Reserved);
+typedef VOID (WINAPI *PIMAGE_TLS_CALLBACK)(PVOID DllHandle, ULONG Reason, PVOID Reserved);
 #endif
 
 // Simple debug logging implementation
