@@ -76,12 +76,13 @@ DWORD WINAPI LoadDll(PVOID p)
 {
     PMANUAL_INJECT ManualInject;
     HMODULE hModule;
-    DWORD64 i, count, delta;
+    DWORD64 i, Function, count, delta;
     DWORD64* ptr;
     PWORD list;
     PIMAGE_BASE_RELOCATION pIBR;
     PIMAGE_IMPORT_DESCRIPTOR pIID;
-    // PDLL_MAIN EntryPoint; // Removed since we're not calling DllMain
+    PIMAGE_IMPORT_BY_NAME pIBN;
+    PDLL_MAIN EntryPoint;
 
     ManualInject = (PMANUAL_INJECT)p;
 
@@ -161,7 +162,6 @@ DWORD WINAPI LoadDll(PVOID p)
             // Process each function import in this DLL (like ProcessClient.cpp)
             for (; *pThunk; ++pThunk, ++pFunc)
             {
-                DWORD64 Function = 0;
                 
                 if (*pThunk & IMAGE_ORDINAL_FLAG64)
                 {
@@ -180,7 +180,7 @@ DWORD WINAPI LoadDll(PVOID p)
                 {
                     // Import by name (64-bit) - function imported by name
                     ManualInject->hMod = (HINSTANCE)0x1249; // About to access import by name structure
-                    PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
+                    pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
                     ManualInject->hMod = (HINSTANCE)0x124A; // About to call GetProcAddress (name)
                     Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
                     ManualInject->hMod = (HINSTANCE)0x124B; // GetProcAddress (name) completed
@@ -230,7 +230,6 @@ DWORD WINAPI LoadDll(PVOID p)
     // Many DLLs need DllMain called to actually start their functionality
     if (ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint)
     {
-        PDLL_MAIN EntryPoint;
         
         ManualInject->hMod = (HINSTANCE)0x1256; // About to calculate DllMain entry point
         EntryPoint = (PDLL_MAIN)((LPBYTE)ManualInject->ImageBase + ManualInject->NtHeaders->OptionalHeader.AddressOfEntryPoint);
