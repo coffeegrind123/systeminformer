@@ -636,6 +636,34 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
     // Check for critical system errors that indicate injection failure
     if (threadExitCode == 0xC0000005) {  // STATUS_ACCESS_VIOLATION
         AmalgamLog("ERROR: DLL crashed during initialization (Access Violation)");
+        
+        // Try to read debug markers to see where it crashed
+        MANUAL_INJECT statusCheck;
+        if (ReadProcessMemory(hProcess, mem1, &statusCheck, sizeof(statusCheck), NULL)) {
+            AmalgamLog("Debug marker at crash: 0x%p", statusCheck.hMod);
+            if (statusCheck.hMod == (HINSTANCE)0x1234) {
+                AmalgamLog("Crashed after entering LoadDll function");
+            } else if (statusCheck.hMod == (HINSTANCE)0x1235) {
+                AmalgamLog("Crashed during delta calculation");
+            } else if (statusCheck.hMod == (HINSTANCE)0x1236) {
+                AmalgamLog("Crashed after delta calculation, before relocations");
+            } else if (statusCheck.hMod == (HINSTANCE)0x1237) {
+                AmalgamLog("Crashed during relocation processing");
+            } else if (statusCheck.hMod == (HINSTANCE)0x1238) {
+                AmalgamLog("Crashed after relocations, before import processing");
+            } else if (statusCheck.hMod == (HINSTANCE)0x1239) {
+                AmalgamLog("Crashed during import directory access");
+            } else if ((DWORD64)statusCheck.hMod >= 0x1260 && (DWORD64)statusCheck.hMod <= 0x1268) {
+                AmalgamLog("Crashed during import processing - marker: 0x%llX", (DWORD64)statusCheck.hMod);
+            } else if ((DWORD64)statusCheck.hMod >= 0x1250 && (DWORD64)statusCheck.hMod <= 0x1259) {
+                AmalgamLog("Crashed during TLS/DllMain processing - marker: 0x%llX", (DWORD64)statusCheck.hMod);
+            } else {
+                AmalgamLog("Crashed with unknown debug marker: 0x%p", statusCheck.hMod);
+            }
+        } else {
+            AmalgamLog("Could not read debug markers from crashed process");
+        }
+        
         CloseHandle(hThread);
         VirtualFreeEx(hProcess, mem1, 0, MEM_RELEASE);
         VirtualFreeEx(hProcess, image, 0, MEM_RELEASE);
