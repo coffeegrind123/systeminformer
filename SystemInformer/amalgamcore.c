@@ -138,17 +138,24 @@ DWORD WINAPI LoadDll(PVOID p)
         ManualInject->hMod = (HINSTANCE)0x1239; // Starting import processing
         
         // Loop through each DLL that needs to be imported (exact AmalgamLoader approach)
+        ManualInject->hMod = (HINSTANCE)0x1260; // About to check pIID->Name
         while (pIID->Name)
         {
+            ManualInject->hMod = (HINSTANCE)0x1261; // Inside while loop, processing DLL
             // Get pointers to the thunk tables (as shown in tutorial)
+            ManualInject->hMod = (HINSTANCE)0x1262; // About to access OriginalFirstThunk
             DWORD64* pThunk = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->OriginalFirstThunk);
+            ManualInject->hMod = (HINSTANCE)0x1263; // About to access FirstThunk
             DWORD64* pFunc = (DWORD64*)((LPBYTE)ManualInject->ImageBase + pIID->FirstThunk);
 
             // If OriginalFirstThunk not defined, use FirstThunk (as per tutorial)
+            ManualInject->hMod = (HINSTANCE)0x1264; // Checking OriginalFirstThunk
             if (!pThunk) { pThunk = pFunc; }
 
             // Load the required DLL module
+            ManualInject->hMod = (HINSTANCE)0x1265; // About to access pIID->Name
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
+            ManualInject->hMod = (HINSTANCE)0x1266; // About to call LoadLibraryA
             hModule = ManualInject->fnLoadLibraryA(importName);
 
             if (!hModule)
