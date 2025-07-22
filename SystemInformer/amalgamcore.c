@@ -136,14 +136,6 @@ DWORD WINAPI LoadDll(PVOID p)
     {
         ManualInject->hMod = (HINSTANCE)0x1239; // Starting import processing
         
-        // Validate import directory is within reasonable bounds
-        LPBYTE baseAddr = (LPBYTE)ManualInject->ImageBase;
-        LPBYTE importAddr = (LPBYTE)pIID;
-        if (importAddr < baseAddr || importAddr > baseAddr + 0x10000000) {
-            ManualInject->hMod = (HINSTANCE)0x1244; // Import directory out of bounds
-            return FALSE;
-        }
-        
         // Loop through each DLL that needs to be imported (exact AmalgamLoader approach)
         while (pIID->Name)
         {
@@ -189,14 +181,6 @@ DWORD WINAPI LoadDll(PVOID p)
                     // Import by name (64-bit) - function imported by name
                     ManualInject->hMod = (HINSTANCE)0x1249; // About to access import by name structure
                     PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
-                    ManualInject->hMod = (HINSTANCE)0x124D; // Import by name structure accessed successfully
-                    
-                    // Validate pIBN pointer before using it
-                    if (!pIBN || (LPBYTE)pIBN < (LPBYTE)ManualInject->ImageBase) {
-                        ManualInject->hMod = (HINSTANCE)0x124E; // Invalid pIBN pointer
-                        return FALSE;
-                    }
-                    
                     ManualInject->hMod = (HINSTANCE)0x124A; // About to call GetProcAddress (name)
                     Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
                     ManualInject->hMod = (HINSTANCE)0x124B; // GetProcAddress (name) completed
