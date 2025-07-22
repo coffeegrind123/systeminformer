@@ -4,18 +4,7 @@
 // RtlAdjustPrivilege is already declared in phlib headers
 typedef BOOL(WINAPI* PDLL_MAIN)(HMODULE, DWORD, PVOID);
 
-// Simplified ManualGetProcAddress - return dummy addresses to avoid crashes
-DWORD64 ManualGetProcAddress(HMODULE hModule, LPCSTR lpProcName)
-{
-    if (!hModule || !lpProcName) return 0;
-    
-    // For now, return a dummy function address to avoid crashes
-    // This is a temporary fix - we'll provide basic function addresses
-    // that won't crash when called (though they may not work perfectly)
-    
-    // Use a simple offset from the module base for common functions
-    return (DWORD64)hModule + 0x1000; // Dummy address that's unlikely to crash
-}
+// ManualGetProcAddress is no longer needed - we use the real fnGetProcAddress from ManualInject structure
 
 // Position-independent shellcode function
 DWORD WINAPI LoadDll(PVOID p)
@@ -138,30 +127,8 @@ DWORD WINAPI LoadDll(PVOID p)
             
             ManualInject->hMod = (HINSTANCE)0x1245; // About to start DLL resolution
             
-            // Use hardcoded addresses for system DLLs since LoadLibraryA fails in TF2
-            // These DLLs are already loaded in the target process at known addresses
-            if (importName[0] == 'k' || importName[0] == 'K') { // kernel32.dll
-                hModule = (HMODULE)0x7ffee3480000; // Real kernel32 base from target
-            } else if (importName[0] == 'n' || importName[0] == 'N') { // ntdll.dll  
-                hModule = (HMODULE)0x7ffee4db0000; // Real ntdll base from target
-            } else if (importName[0] == 'u' || importName[0] == 'U') { // user32.dll
-                hModule = (HMODULE)0x7ffee32c0000; // Real user32 base from target
-            } else if (importName[0] == 'a' || importName[0] == 'A') { // advapi32.dll
-                hModule = (HMODULE)0x7ffee3030000; // Real advapi32 base from target
-            } else if (importName[0] == 'm' || importName[0] == 'M') { // msvcrt.dll
-                hModule = (HMODULE)0x7ffee3550000; // Real msvcrt base from target
-            } else if (importName[0] == 'g' || importName[0] == 'G') { // gdi32.dll
-                hModule = (HMODULE)0x7ffee4950000; // Real gdi32 base from target
-            } else if (importName[0] == 'o' || importName[0] == 'O') { // ole32.dll, oleaut32.dll
-                hModule = (HMODULE)0x7ffee2c40000; // Real ole32 base from target
-            } else if (importName[0] == 's' || importName[0] == 'S') { // shell32.dll, sechost.dll
-                hModule = (HMODULE)0x7ffee37e0000; // Real shell32 base from target
-            } else {
-                // For unknown DLLs, skip to avoid crashes
-                ManualInject->hMod = (HINSTANCE)0x405; // Unknown DLL skipped
-                pIID++;
-                continue;
-            }
+            // Use real LoadLibraryA like the working ProcessClient.cpp implementation
+            hModule = ManualInject->fnLoadLibraryA(importName);
 
             if (!hModule)
             {
@@ -171,28 +138,27 @@ DWORD WINAPI LoadDll(PVOID p)
             
             ManualInject->hMod = (HINSTANCE)0x1246; // DLL module resolved, starting function resolution
 
-            // Use real function resolution like AmalgamLoader
-            // This is critical - DLL will crash if we use dummy addresses
+            // Process each function import in this DLL (like ProcessClient.cpp)
             for (; *pThunk; ++pThunk, ++pFunc)
             {
                 DWORD64 Function = 0;
                 
                 if (*pThunk & IMAGE_ORDINAL_FLAG64)
                 {
-                    // Import by ordinal - use manual export table parsing
-                    ManualInject->hMod = (HINSTANCE)0x1247; // About to call ManualGetProcAddress (ordinal)
-                    Function = ManualGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
-                    ManualInject->hMod = (HINSTANCE)0x1248; // ManualGetProcAddress (ordinal) completed
+                    // Import by ordinal (64-bit) - function imported by number
+                    ManualInject->hMod = (HINSTANCE)0x1247; // About to call GetProcAddress (ordinal)
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    ManualInject->hMod = (HINSTANCE)0x1248; // GetProcAddress (ordinal) completed
                     if (!Function)
                     {
-                        // If function resolution fails, this is a real error
-                        ManualInject->hMod = (HINSTANCE)0x404;
+                        ManualInject->hMod = (HINSTANCE)0x405; // Ordinal import failed
                         return FALSE;
                     }
+                    *pFunc = Function; // Update IAT with function address
                 }
                 else
                 {
-                    // Import by name - use manual export table parsing
+                    // Import by name (64-bit) - function imported by name
                     ManualInject->hMod = (HINSTANCE)0x1249; // About to access import by name structure
                     PIMAGE_IMPORT_BY_NAME pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
                     ManualInject->hMod = (HINSTANCE)0x124D; // Import by name structure accessed successfully
@@ -203,19 +169,16 @@ DWORD WINAPI LoadDll(PVOID p)
                         return FALSE;
                     }
                     
-                    ManualInject->hMod = (HINSTANCE)0x124A; // About to call ManualGetProcAddress (name)
-                    Function = ManualGetProcAddress(hModule, (LPCSTR)pIBN->Name);
-                    ManualInject->hMod = (HINSTANCE)0x124B; // ManualGetProcAddress (name) completed
+                    ManualInject->hMod = (HINSTANCE)0x124A; // About to call GetProcAddress (name)
+                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    ManualInject->hMod = (HINSTANCE)0x124B; // GetProcAddress (name) completed
                     if (!Function)
                     {
-                        // If function resolution fails, this is a real error
-                        ManualInject->hMod = (HINSTANCE)0x405;
+                        ManualInject->hMod = (HINSTANCE)0x406; // Name import failed
                         return FALSE;
                     }
+                    *pFunc = Function; // Update IAT with function address
                 }
-                
-                // Set the real function address in the import table
-                *pFunc = Function;
             }
             
             ManualInject->hMod = (HINSTANCE)0x123F; // Successfully resolved imports
