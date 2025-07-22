@@ -308,18 +308,18 @@ NTSTATUS CALLBACK SetupExtractBuild(
 
                 if (PhEndsWithString2(extractPath, L"\\ksi.dll", FALSE))
                 {
-                    if (NT_SUCCESS(SetupUseExistingKsi(extractPath, buffer, zipFileBufferLength)))
+                    if (NT_SUCCESS(SetupUseExistingKsi(extractPath, buffer, (ULONG)zipFileBufferLength)))
                         break;
-                    if (NT_SUCCESS(SetupOverwriteFile(extractPath, buffer, zipFileBufferLength)))
+                    if (NT_SUCCESS(SetupOverwriteFile(extractPath, buffer, (ULONG)zipFileBufferLength)))
                         break;
-                    if (NT_SUCCESS(SetupUpdateKsi(Context, extractPath, buffer, zipFileBufferLength)))
+                    if (NT_SUCCESS(SetupUpdateKsi(Context, extractPath, buffer, (ULONG)zipFileBufferLength)))
                         break;
 
                     updateKsiAttempt = TRUE;
                 }
                 else
                 {
-                    if (NT_SUCCESS(SetupOverwriteFile(extractPath, buffer, zipFileBufferLength)))
+                    if (NT_SUCCESS(SetupOverwriteFile(extractPath, buffer, (ULONG)zipFileBufferLength)))
                         break;
                 }
 
