@@ -650,8 +650,15 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
     AmalgamLog("Writing LoadDll function to address: 0x%p (size: %llu bytes)", functionAddress, loadDllSize);
     AmalgamLog("Loader memory layout: Structure at 0x%p, Function at 0x%p", mem1, functionAddress);
     AmalgamLog("Structure size: %zu, Function starts at offset: %zu", sizeof(MANUAL_INJECT), sizeof(MANUAL_INJECT));
+    AmalgamLog("LoadDll function pointer: 0x%p", LoadDll);
     
-    if (!WriteProcessMemory(hProcess, functionAddress, LoadDll, (SIZE_T)loadDllSize, NULL))
+    // Verify the function address calculation
+    PVOID expectedAddress = (PVOID)((PMANUAL_INJECT)mem1 + 1);
+    AmalgamLog("Expected function address: 0x%p, Calculated: 0x%p, Match: %s", 
+               expectedAddress, functionAddress, (expectedAddress == functionAddress) ? "YES" : "NO");
+    
+    SIZE_T bytesWritten = 0;
+    if (!WriteProcessMemory(hProcess, functionAddress, LoadDll, (SIZE_T)loadDllSize, &bytesWritten))
     {
         DWORD error = GetLastError();
         AmalgamLog("Memory write error for function (error: %d)", error);
@@ -661,7 +668,20 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
         CloseHandle(hProcess);
         return -1;
     }
-    AmalgamLog("LoadDll function written successfully");
+    AmalgamLog("LoadDll function written successfully - %zu bytes written", bytesWritten);
+    
+    // Verify the first few bytes were written correctly
+    BYTE testBuffer[16];
+    SIZE_T testBytesRead = 0;
+    if (ReadProcessMemory(hProcess, functionAddress, testBuffer, sizeof(testBuffer), &testBytesRead)) {
+        AmalgamLog("First 16 bytes at function address: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                   testBuffer[0], testBuffer[1], testBuffer[2], testBuffer[3],
+                   testBuffer[4], testBuffer[5], testBuffer[6], testBuffer[7],
+                   testBuffer[8], testBuffer[9], testBuffer[10], testBuffer[11],
+                   testBuffer[12], testBuffer[13], testBuffer[14], testBuffer[15]);
+    } else {
+        AmalgamLog("Failed to read back function bytes for verification");
+    }
 
     // Create remote thread
     AmalgamLog("Creating remote thread to execute LoadDll function...");
