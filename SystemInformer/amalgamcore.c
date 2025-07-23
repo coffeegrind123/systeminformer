@@ -98,12 +98,20 @@ DWORD WINAPI LoadDll(PVOID p)
     PIMAGE_IMPORT_DESCRIPTOR pIID;
     PIMAGE_IMPORT_BY_NAME pIBN;
     PDLL_MAIN EntryPoint;
+    
+    // Local copies of function pointers to avoid remote memory access
+    pLoadLibraryA fnLoadLibraryA;
+    pGetProcAddress fnGetProcAddress;
 
     ManualInject = (PMANUAL_INJECT)p;
 
     if (!ManualInject) {
         return FALSE;
     }
+    
+    // Copy function pointers to local variables
+    fnLoadLibraryA = ManualInject->fnLoadLibraryA;
+    fnGetProcAddress = ManualInject->fnGetProcAddress;
 
     // Mark that we entered the function successfully
     DEBUG_MARKER(ManualInject, 0x1234); // Entry marker
@@ -193,7 +201,7 @@ DWORD WINAPI LoadDll(PVOID p)
             }
             
             DEBUG_MARKER(ManualInject, 0x1266); // About to call LoadLibraryA
-            hModule = ManualInject->fnLoadLibraryA(importName);
+            hModule = fnLoadLibraryA(importName);
             DEBUG_MARKER(ManualInject, 0x1267); // LoadLibraryA completed successfully
 
             if (!hModule)
@@ -212,7 +220,7 @@ DWORD WINAPI LoadDll(PVOID p)
                 {
                     // Import by ordinal (64-bit) - function imported by number
                     DEBUG_MARKER(ManualInject, 0x1247); // About to call GetProcAddress (ordinal)
-                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
+                    Function = (DWORD64)fnGetProcAddress(hModule, (LPCSTR)(*pThunk & 0xFFFF));
                     DEBUG_MARKER(ManualInject, 0x1248); // GetProcAddress (ordinal) completed
                     if (!Function)
                     {
@@ -227,7 +235,7 @@ DWORD WINAPI LoadDll(PVOID p)
                     DEBUG_MARKER(ManualInject, 0x1249); // About to access import by name structure
                     pIBN = (PIMAGE_IMPORT_BY_NAME)((LPBYTE)ManualInject->ImageBase + *pThunk);
                     DEBUG_MARKER(ManualInject, 0x124A); // About to call GetProcAddress (name)
-                    Function = (DWORD64)ManualInject->fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
+                    Function = (DWORD64)fnGetProcAddress(hModule, (LPCSTR)pIBN->Name);
                     DEBUG_MARKER(ManualInject, 0x124B); // GetProcAddress (name) completed
                     if (!Function)
                     {
