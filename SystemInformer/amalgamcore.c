@@ -193,17 +193,8 @@ DWORD WINAPI LoadDll(PVOID p)
             }
             
             DEBUG_MARKER(ManualInject, 0x1266); // About to call LoadLibraryA
-            
-            __try
-            {
-                hModule = ManualInject->fnLoadLibraryA(importName);
-                DEBUG_MARKER(ManualInject, 0x1267); // LoadLibraryA completed successfully
-            }
-            __except(EXCEPTION_EXECUTE_HANDLER)
-            {
-                DEBUG_MARKER(ManualInject, 0x1268); // LoadLibraryA crashed
-                return FALSE;
-            }
+            hModule = ManualInject->fnLoadLibraryA(importName);
+            DEBUG_MARKER(ManualInject, 0x1267); // LoadLibraryA completed successfully
 
             if (!hModule)
             {
