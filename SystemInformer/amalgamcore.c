@@ -200,7 +200,19 @@ DWORD WINAPI LoadDll(PVOID p)
                 return FALSE;
             }
             
-            DEBUG_MARKER(ManualInject, 0x1266); // About to call LoadLibraryA
+            // Store the import name in the debug marker for crash analysis
+            // Use the first 4 characters as a marker (will be visible in crash log)
+            DWORD nameMarker = 0x1266;
+            if (importName && importName[0]) {
+                nameMarker = (DWORD)(
+                    ((DWORD)importName[0] << 24) |
+                    ((DWORD)(importName[1] ? importName[1] : 0) << 16) |
+                    ((DWORD)(importName[2] ? importName[2] : 0) << 8) |
+                    ((DWORD)(importName[3] ? importName[3] : 0))
+                );
+            }
+            DEBUG_MARKER(ManualInject, nameMarker); // Store import name in marker
+            
             hModule = fnLoadLibraryA(importName);
             DEBUG_MARKER(ManualInject, 0x1267); // LoadLibraryA completed successfully
 
@@ -718,8 +730,15 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
                     AmalgamLog("Crash: Empty import name");
                 } else if (statusCheck.hMod == (HINSTANCE)0x126D) {
                     AmalgamLog("Crash: Failed to access import name string");
-                } else if (statusCheck.hMod == (HINSTANCE)0x1266) {
-                    AmalgamLog("Crash: About to call LoadLibraryA (function pointer issue)");
+                } else if ((DWORD64)statusCheck.hMod != 0x1266) {
+                    // Decode the import name from the marker
+                    DWORD nameMarker = (DWORD)(DWORD64)statusCheck.hMod;
+                    char importName[5] = {0};
+                    importName[0] = (char)((nameMarker >> 24) & 0xFF);
+                    importName[1] = (char)((nameMarker >> 16) & 0xFF);
+                    importName[2] = (char)((nameMarker >> 8) & 0xFF);
+                    importName[3] = (char)(nameMarker & 0xFF);
+                    AmalgamLog("Crash: About to call LoadLibraryA for DLL: '%.4s' (marker: 0x%X)", importName, nameMarker);
                 } else if (statusCheck.hMod == (HINSTANCE)0x1268) {
                     AmalgamLog("Crash: LoadLibraryA crashed");
                 }
