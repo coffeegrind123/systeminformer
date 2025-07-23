@@ -200,19 +200,19 @@ DWORD WINAPI LoadDll(PVOID p)
                 return FALSE;
             }
             
-            // Store the import name in the debug marker for crash analysis
-            // Use the first 4 characters as a marker (will be visible in crash log)
-            DWORD nameMarker = 0x1266;
-            if (importName && importName[0]) {
-                nameMarker = (DWORD)(
-                    ((DWORD)importName[0] << 24) |
-                    ((DWORD)(importName[1] ? importName[1] : 0) << 16) |
-                    ((DWORD)(importName[2] ? importName[2] : 0) << 8) |
-                    ((DWORD)(importName[3] ? importName[3] : 0))
-                );
-            }
-            DEBUG_MARKER(ManualInject, nameMarker); // Store import name in marker
+            DEBUG_MARKER(ManualInject, 0x1266); // About to call LoadLibraryA
             
+            // Test with hardcoded kernel32.dll first to see if LoadLibraryA works at all
+            char testDll[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+            HMODULE testModule = fnLoadLibraryA(testDll);
+            DEBUG_MARKER(ManualInject, 0x1270); // Test LoadLibraryA with kernel32.dll
+            
+            if (!testModule) {
+                DEBUG_MARKER(ManualInject, 0x1271); // Test LoadLibraryA failed
+                return FALSE;
+            }
+            
+            DEBUG_MARKER(ManualInject, 0x1272); // Test LoadLibraryA succeeded, now try real import
             hModule = fnLoadLibraryA(importName);
             DEBUG_MARKER(ManualInject, 0x1267); // LoadLibraryA completed successfully
 
@@ -718,7 +718,7 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
                 AmalgamLog("Crashed after relocations, before import processing");
             } else if (statusCheck.hMod == (HINSTANCE)0x1239) {
                 AmalgamLog("Crashed during import directory access");
-            } else if ((DWORD64)statusCheck.hMod >= 0x1260 && (DWORD64)statusCheck.hMod <= 0x126D) {
+            } else if ((DWORD64)statusCheck.hMod >= 0x1260 && (DWORD64)statusCheck.hMod <= 0x1272) {
                 AmalgamLog("Crashed during import processing - marker: 0x%llX", (DWORD64)statusCheck.hMod);
                 if (statusCheck.hMod == (HINSTANCE)0x1269) {
                     AmalgamLog("Crash: Got import name, checking validity");
@@ -741,6 +741,12 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
                     AmalgamLog("Crash: About to call LoadLibraryA for DLL: '%.4s' (marker: 0x%X)", importName, nameMarker);
                 } else if (statusCheck.hMod == (HINSTANCE)0x1268) {
                     AmalgamLog("Crash: LoadLibraryA crashed");
+                } else if (statusCheck.hMod == (HINSTANCE)0x1270) {
+                    AmalgamLog("Crash: After test LoadLibraryA call with kernel32.dll");
+                } else if (statusCheck.hMod == (HINSTANCE)0x1271) {
+                    AmalgamLog("Crash: Test LoadLibraryA with kernel32.dll failed");
+                } else if (statusCheck.hMod == (HINSTANCE)0x1272) {
+                    AmalgamLog("Crash: Test LoadLibraryA succeeded, crashed on real import");
                 }
             } else if ((DWORD64)statusCheck.hMod >= 0x1250 && (DWORD64)statusCheck.hMod <= 0x1259) {
                 AmalgamLog("Crashed during TLS/DllMain processing - marker: 0x%llX", (DWORD64)statusCheck.hMod);
