@@ -103,15 +103,26 @@ DWORD WINAPI LoadDll(PVOID p)
     pLoadLibraryA fnLoadLibraryA;
     pGetProcAddress fnGetProcAddress;
 
+    // Try to set an immediate debug marker to see if we can even start
+    if (p) {
+        ((PMANUAL_INJECT)p)->hMod = (HINSTANCE)0x1000; // Immediate entry marker
+    }
+    
     ManualInject = (PMANUAL_INJECT)p;
 
     if (!ManualInject) {
         return FALSE;
     }
     
+    // Mark that we got past the pointer assignment
+    DEBUG_MARKER(ManualInject, 0x1001); // Got past pointer assignment
+    
     // Copy function pointers to local variables
     fnLoadLibraryA = ManualInject->fnLoadLibraryA;
     fnGetProcAddress = ManualInject->fnGetProcAddress;
+    
+    // Mark that we got past function pointer copying
+    DEBUG_MARKER(ManualInject, 0x1002); // Got past function pointer copying
 
     // Mark that we entered the function successfully
     DEBUG_MARKER(ManualInject, 0x1234); // Entry marker
@@ -750,6 +761,12 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
                 }
             } else if ((DWORD64)statusCheck.hMod >= 0x1250 && (DWORD64)statusCheck.hMod <= 0x1259) {
                 AmalgamLog("Crashed during TLS/DllMain processing - marker: 0x%llX", (DWORD64)statusCheck.hMod);
+            } else if (statusCheck.hMod == (HINSTANCE)0x1000) {
+                AmalgamLog("Crash: Immediate entry - function started but crashed right after");
+            } else if (statusCheck.hMod == (HINSTANCE)0x1001) {
+                AmalgamLog("Crash: Got past pointer assignment but crashed after");
+            } else if (statusCheck.hMod == (HINSTANCE)0x1002) {
+                AmalgamLog("Crash: Got past function pointer copying but crashed after");
             } else {
                 AmalgamLog("Crashed with unknown debug marker: 0x%p", statusCheck.hMod);
             }
