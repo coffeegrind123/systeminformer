@@ -170,6 +170,28 @@ DWORD WINAPI LoadDll(PVOID p)
             // Load the required DLL module
             DEBUG_MARKER(ManualInject, 0x1265); // About to access pIID->Name
             char* importName = (char*)((LPBYTE)ManualInject->ImageBase + pIID->Name);
+            
+            // Validate the import name string before calling LoadLibraryA
+            DEBUG_MARKER(ManualInject, 0x1269); // Got import name, checking validity
+            if (!importName || (DWORD64)importName < 0x1000) {
+                DEBUG_MARKER(ManualInject, 0x126A); // Invalid import name pointer
+                return FALSE;
+            }
+            
+            // Try to access first character to test string validity
+            DEBUG_MARKER(ManualInject, 0x126B); // About to test string access
+            __try {
+                volatile char firstChar = importName[0];
+                if (firstChar == 0) {
+                    DEBUG_MARKER(ManualInject, 0x126C); // Empty import name
+                    return FALSE;
+                }
+            }
+            __except(EXCEPTION_EXECUTE_HANDLER) {
+                DEBUG_MARKER(ManualInject, 0x126D); // Failed to access import name string
+                return FALSE;
+            }
+            
             DEBUG_MARKER(ManualInject, 0x1266); // About to call LoadLibraryA
             
             __try
@@ -685,8 +707,23 @@ int WINAPI ManualMapInject(const wchar_t* dllPath, const wchar_t* processName)
                 AmalgamLog("Crashed after relocations, before import processing");
             } else if (statusCheck.hMod == (HINSTANCE)0x1239) {
                 AmalgamLog("Crashed during import directory access");
-            } else if ((DWORD64)statusCheck.hMod >= 0x1260 && (DWORD64)statusCheck.hMod <= 0x1268) {
+            } else if ((DWORD64)statusCheck.hMod >= 0x1260 && (DWORD64)statusCheck.hMod <= 0x126D) {
                 AmalgamLog("Crashed during import processing - marker: 0x%llX", (DWORD64)statusCheck.hMod);
+                if (statusCheck.hMod == (HINSTANCE)0x1269) {
+                    AmalgamLog("Crash: Got import name, checking validity");
+                } else if (statusCheck.hMod == (HINSTANCE)0x126A) {
+                    AmalgamLog("Crash: Invalid import name pointer");
+                } else if (statusCheck.hMod == (HINSTANCE)0x126B) {
+                    AmalgamLog("Crash: About to test string access");
+                } else if (statusCheck.hMod == (HINSTANCE)0x126C) {
+                    AmalgamLog("Crash: Empty import name");
+                } else if (statusCheck.hMod == (HINSTANCE)0x126D) {
+                    AmalgamLog("Crash: Failed to access import name string");
+                } else if (statusCheck.hMod == (HINSTANCE)0x1266) {
+                    AmalgamLog("Crash: About to call LoadLibraryA (function pointer issue)");
+                } else if (statusCheck.hMod == (HINSTANCE)0x1268) {
+                    AmalgamLog("Crash: LoadLibraryA crashed");
+                }
             } else if ((DWORD64)statusCheck.hMod >= 0x1250 && (DWORD64)statusCheck.hMod <= 0x1259) {
                 AmalgamLog("Crashed during TLS/DllMain processing - marker: 0x%llX", (DWORD64)statusCheck.hMod);
             } else {
